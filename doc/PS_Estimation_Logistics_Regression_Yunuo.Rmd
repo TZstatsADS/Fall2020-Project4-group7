@@ -28,7 +28,6 @@ lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
 ```{r}
 prop.fit.high_log_reg <- highdim[, setdiff(names(highdim), 'Y')]
 prop.out.high_log_reg <- glm(A ~., data = prop.fit.high_log_reg,family = binomial(logit))
-# summary(prop.out.high_log_reg)
 pscore_log_reg_h <-  prop.out.high_log_reg$fitted
 high_cp_log_reg <- highdim
 high_cp_log_reg$pscore=pscore_log_reg_h
