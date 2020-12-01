@@ -5,7 +5,6 @@ date: "11/30/2020"
 output: pdf_document
 ---
 ```{r}
-rm(list=ls())
 packages.used <- c("grDevices")
 # check packages that need to be installed.
 packages.needed <- setdiff(packages.used, 
