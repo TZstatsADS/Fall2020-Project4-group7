@@ -7,17 +7,17 @@ output: html_document
 ## Overview
 Summary Table
 
-#### Step 0.1 Load Required Paackages
+#### Step 0.1 Load Required Packages
 ```{r message=FALSE}
 packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse","optmatch")
 # check packages that need to be installed.
-packages.needed <- setdiff(packages.used, 
-                           intersect(installed.packages()[,1], 
-                                     packages.used))
+#packages.needed <- setdiff(packages.used, 
+#                           intersect(installed.packages()[,1], 
+#                                     packages.used))
 # install additional packages
-if(length(packages.needed) > 0){
-  install.packages(packages.needed, dependencies = TRUE)
-}
+#if(length(packages.needed) > 0){
+#  install.packages(packages.needed, dependencies = TRUE)
+#}
 library(grDevices)
 library(glmnet)
 library(rpart)
@@ -26,7 +26,7 @@ library(MatchIt)
 library(readr)
 library(dplyr)
 library(reshape2)
-library(tidyverse)
+#library(tidyverse)
 ```
 
 
@@ -579,7 +579,7 @@ lines(density(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==0]),co
 ```
 
 ### 2. Propensity Score Matching
-introduce full matching
+Full matching is a type of subclassification that forms the subclasses in an optimal way. It creates a series of matched sets where each matched set contains at least one treated individual and at least one control individual. Full matching is optimal in terms of minimizing a weighted average of the estimated distance measure between each treated subject and each control subject within each subclass. Here, we use propensity score to measure the distance.
 ```{r, echo = FALSE, results = TRUE, message=FALSE}
 library(tidyverse)
 full_matching_ate <- function(dat,propensity_score){
@@ -674,13 +674,103 @@ data.frame(Logistic = c(time_a,time_b,time_B),L1 = c(time_c,time_d,time_D),L2 = 
 ```
 
 
-
 ### 3. Weighted Regression
-introduce weighted regression
-
-
+We will use the propensity score that estimated by logistic regression in part 1.1.1 and apply weighted regression to estimate ATE.
+Weighted least square estimation of the regression function:
+$$Y_i=\alpha_0+\tau*T_i+\alpha_1^{'}*Z_i+\alpha_2^{'}*(Z_i-\bar{Z})*T_i+\epsilon_i$$
+The weight $w_i$ is:
+$$w_i=\frac{T_i}{\hat{e_i}}+\frac{1-T_i}{1-\hat{e_i}}$$
+where $\hat{e_i}$ is the estimated propensity score for individual i. This weighting serves to weight both the treated and control groups up to the full sample
+The $Z_i$ are a subset of the covariates $X_i$ with sample average $\bar{Z}$. $\tau$ is an estimate for ATE.
 #### 3.1 Estimate by Logistic Regression + Weighted Regression 
+**High dimensional data:**
+First, we need to find $Z_i$ which is the subset of the covariates $X_i$, we will select $Z$ by estimating linear regressions:
+$$Y_i=\beta_{k0}+\beta_{k1}*T_i+\beta_{k2}*X_{ik}+\epsilon_i$$
+We calculate the t-statistic for the test of the null hypothesis that the slope coefficient $\beta_{k2}$ is equal to zero in each of these regressions, and now select for $Z$ all the covariates with a t-statistic larger in absolute value than 1.96. 
+we will only keep covariates with t-values less than 1.96 or larger than 1.96. Therefore, the following covariates do not qualify:
 
+```{r,echo = FALSE, results = TRUE, message=False}
+high=highdim
+low=lowdim
+# Assume all covariates have an influence on the assignment to either the control or the treatment group
+lr_high <- glm(A~., data=subset(high,select=-Y), family = binomial())
+# Attaching propensity score to the high_dim dataset
+high$psvalue <- predict(lr_high, type='response')
+# Estimation and storing weights using propensity score estimated using logistic regression
+# Attaching weight to the high_dim dataset
+high$weight.ATE <- ifelse(high$A == 1, 1/high$psvalue, 1/(1-high$psvalue))
+# calculate the mean of each column
+high_mean <- colMeans(high)
+# select variables by regression
+# selected by set t less than 1.96 or larger than 1.96
+t_high=list()
+for (i in names(high)){
+  t_high[[i]] <- summary(lm(Y~get(i), high))[["coefficients"]][2, "t value"]
+}
+t_high = data.frame(t_high)%>%melt()%>%filter(between(value, -1.96,1.96))
+t_high$variable
+```
+
+After deleting the above variables, ATE is estimated by following result, which is around -4.135:
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+
+# We choose to delete the following variables
+delete1 <- names(high) %in% c('V1','V2','V4','V5','V8','V9','V13','V15','V18','V28','V29','V34','V36','V39','V41','V42','V43','V44','V47','V49','V50','V52','V53','V54','V55','V57','V58','V59','V97','V151')
+high_delete <- high[!delete1]
+# calculate the mean of each column
+high_delete_mean <- colMeans(high_delete)
+# Add columns of treatment effect
+high_delete_diff <- high_delete %>% 
+  mutate_at(list(mean_diff = (~.*high_delete$A - high_delete_mean*high_delete$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+time_wlr_high = system.time(ATE_high_selected <- lm(Y~., data = high_delete_diff , weights = high_delete$weight.ATE))
+summary(ATE_high_selected)
+#ATE = -4.135
+#Time used to estimate ATE
+#time_wlr_high[[3]]
+```
+
+**Low dimensional data:**
+For low dimensional data, we follow the same steps, first is to find the subset:
+```{r,echo = FALSE, results = TRUE, message=False}
+# Assume all covariates have an influence on the assignment to either the control or the treatment group
+lr_low <- glm(A~., data=subset(low,select=-Y), family = binomial())
+# Attaching propensity score to the low_dim dataset
+low$psvalue <- predict(lr_low, type='response')
+# Estimation and storing weights using propensity score estimated using logistic regression
+# Attaching weight to the low_dim dataset
+low$weight.ATE <- ifelse(low$A == 1, 1/low$psvalue, 1/(1-low$psvalue))
+# calculate the mean of each column
+low_mean <- colMeans(low)
+# select variables by regression
+# selected by set t less than 1.96 or larger than 1.96
+t_low=list()
+for (i in names(low)){
+  t_low[[i]] <- summary(lm(Y~get(i), low))[["coefficients"]][2, "t value"]
+}
+t_low = data.frame(t_low)%>%melt()%>%filter(between(value, -1.96,1.96))
+t_low$variable
+```
+
+After deleting the above variables, ATE is estimated by following result, which is around 2.788:
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+# We choose to delete the following variables
+delete <- names(low) %in% c("V2", "V4","V8","V9","V11","V14","V16","V20")
+low_delete <- low[!delete]
+# calculate the mean of each column
+low_delete_mean <- colMeans(low_delete)
+# Add columns of treatment effect
+low_delete_diff <- low_delete %>% 
+  mutate_at(list(mean_diff = (~.*low_delete$A - low_delete_mean*low_delete$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+time_wlr_low = system.time(ATE_low_selected <- lm(Y~., data = low_delete_diff , weights = low_delete$weight.ATE))
+summary(ATE_low_selected)
+#ATE= 2.788
+#Time used to estimate ATE
+#time_wlr_low[[3]]
+```
 
 ### Summary
 
