@@ -7,16 +7,33 @@ output: html_document
 ## Overview
 Summary Table
 
+#### Step 0.1 Load Required Paackages
 ```{r message=FALSE}
+packages.used <- c("grDevices","glmnet","rpart","gbm", "readr","dplyr","reshape2","tidyverse")
+# check packages that need to be installed.
+packages.needed <- setdiff(packages.used, 
+                           intersect(installed.packages()[,1], 
+                                     packages.used))
+# install additional packages
+if(length(packages.needed) > 0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+library(grDevices)
+library(glmnet)
+library(rpart)
+library(gbm)
 library(readr)
 library(dplyr)
 library(reshape2)
+library(tidyverse)
 ```
 
-### Step 0. Set work directories
-```{r wkdir, eval=FALSE}
-set.seed(2020)
-setwd("~/GitHub/Fall2020-Project4-group-7/doc")
+
+#### Step 0.2 Import Data
+```{r,echo=FALSE,results = FALSE,message = FALSE}
+path = '../data/'
+highdim = read_csv(paste0(path, 'highDim_dataset.csv')) #2000  187
+lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
 ```
 
 ### 1. Propensity Score Estimation
@@ -26,19 +43,69 @@ We assume that:
 $$0<e(x)<1$$
 for all x, here we denote X as the covariates of p-dimensional vector of pre-treatment variables.
 
-#### 1.1 Estimate by Logistic Regression 
+#### 1.1 Without Oversampling for Imbalanced Classification
+##### 1.1.1 Estimate by Logistic Regression
+**High dimensional data:**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+prop.fit.high_log_reg <- highdim[, setdiff(names(highdim), 'Y')]
+start.time_ps_high_log_reg <- Sys.time()
+prop.out.high_log_reg <- glm(A ~., data = prop.fit.high_log_reg,family = binomial(logit))
+pscore_log_reg_h <-  prop.out.high_log_reg$fitted
+end.time_ps_high_log_reg <- Sys.time()
+high_cp_log_reg <- highdim
+high_cp_log_reg$pscore=pscore_log_reg_h
+time_ps_high_log_reg <- end.time_ps_high_log_reg - start.time_ps_high_log_reg
+cat("Processing time of propensity score estimation by Logistic Regression for high dimensional data is" ,time_ps_high_log_reg, "seconds.")
+```
+```{r,echo = FALSE, results = TRUE}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,4),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==1]),col='red')
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,4),xlim=c(0,1),add=TRUE)
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==0]),col='blue')
+```
+
+**Low dimensional data:**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+prop.fit.low_log_reg <- lowdim[, setdiff(names(lowdim), 'Y')]
+start.time_ps_low_log_reg <- Sys.time()
+prop.out.low_log_reg <- glm(A ~., data = prop.fit.low_log_reg,family = binomial(logit))
+pscore_log_reg_l <-  prop.out.low_log_reg$fitted
+end.time_ps_low_log_reg <- Sys.time()
+low_cp_log_reg <- lowdim
+low_cp_log_reg$pscore=pscore_log_reg_l
+time_ps_low_log_reg <- end.time_ps_low_log_reg - start.time_ps_low_log_reg
+cat("Processing time of propensity score estimation by Logistic Regression for low dimensional data is" ,time_ps_low_log_reg, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==1]),col='red')
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==0]),col='blue')
+```
+
+#### 1.1.2 Estimate by L1 Regression 
 
 
-#### 1.2 Estimate by L1 Regression 
+#### 1.1.3 Estimate by L2 Regression 
 
 
-#### 1.3 Estimate by L2 Regression 
+#### 1.1.4 Estimate by Boost Stump
 
 
-#### 1.4 Estimate by Boost Stump
+#### 1.1.5 Estimate by Cart
 
 
-#### 1.5 Estimate by Cart
+#### 1.2 Oversampling for Imbalanced Classification
 
 
 ### 2. Propensity Score Matching
