@@ -1,0 +1,86 @@
+---
+title: "PS_Estimation_L2_Yunuo"
+author: "Yunuo Ma"
+date: "11/30/2020"
+output: pdf_document
+---
+
+```{r}
+packages.used <- c("grDevices","glmnet")
+# check packages that need to be installed.
+packages.needed <- setdiff(packages.used, 
+                           intersect(installed.packages()[,1], 
+                                     packages.used))
+# install additional packages
+if(length(packages.needed) > 0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+library(grDevices)
+library(glmnet)
+```
+
+```{r}
+path = './data/'
+highdim = read_csv(paste0(path, 'highDim_dataset.csv')) #2000  187
+lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
+```
+
+## L2 Penalized Logistic Regression
+### For High Dimension Data
+```{r}
+set.seed(0)
+prop.fit.high_l2 <- highdim[, setdiff(names(highdim), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.high_l2)[,-1]
+y_l2 <- prop.fit.high_l2$A
+cv.ridge <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+start.time_ps_high_l2 <- Sys.time()
+prop.out.high_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge$lambda.min)
+logit.pred_l2 <- predict(prop.out.high_l2, newx=x_l2)
+pscore_l2_h <- 1 / (1 + exp(-logit.pred_l2))
+end.time_ps_high_l2 <- Sys.time()
+high_cp_l2 <- highdim
+high_cp_l2$pscore = as.vector(pscore_l2_h)
+time_ps_high_l2 <- end.time_ps_high_l2 - start.time_ps_high_l2
+time_ps_high_l2
+```
+
+```{r}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_l2$pscore[high_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_l2$pscore[high_cp_l2$A==1]),col='red')
+hist(high_cp_l2$pscore[high_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),add=TRUE)
+lines(density(high_cp_l2$pscore[high_cp_l2$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+set.seed(0)
+prop.fit.low_l2 <- lowdim[, setdiff(names(lowdim), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.low_l2)[,-1]
+y_l2 <- prop.fit.low_l2$A
+cv.ridge <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+start.time_ps_low_l2 <- Sys.time()
+prop.out.low_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge$lambda.min)
+logit.pred_l2 <- predict(prop.out.low_l2, newx=x_l2)
+pscore_l2_l <- 1 / (1 + exp(-logit.pred_l2))
+end.time_ps_low_l2 <- Sys.time()
+low_cp_l2 <- lowdim
+low_cp_l2$pscore = as.vector(pscore_l2_l)
+time_ps_low_l2 <- end.time_ps_low_l2 - start.time_ps_low_l2
+time_ps_low_l2
+```
+
+```{r}
+hist(low_cp_l2$pscore[low_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l2$pscore[low_cp_l2$A==1]),col='red')
+hist(low_cp_l2$pscore[low_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),add=TRUE)
+lines(density(low_cp_l2$pscore[low_cp_l2$A==0]),col='blue')
+```
