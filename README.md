@@ -8,7 +8,7 @@ Term: Fall 2020
 + Project title: Causal Inference Algorithms Evaluation 
 + Project Subtitle: Compare different Propensity Score Estimation Methods for Full Matching (PS) and Weighted Regression
 + Team members
-	+ Yunuo Ma
+	+ Yunuo Ma (Presenter)
 	+ team member 2
 	+ team member 3
 	+ team member 4
