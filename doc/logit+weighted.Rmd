@@ -58,16 +58,26 @@ summary(ATE_low)
 ```
 
 ```{r}
-# select variables by weighted regression
+# select variables by regression
 lr_low <- lm(Y~.-psvalue-weight.ATE, data = low)
 summary(lr_low)
 
 # result shows we should not include v2, v4, v9, v14
 ```
+```{r}
+# select variables by regression
+# selected by set t less than 1.96 or larger than 1.96
+t_low=list()
+for (i in names(low)){
+  t_low[[i]] <- summary(lm(Y~get(i), low))[["coefficients"]][2, "t value"]
+}
+t_low = data.frame(t_low)%>%melt()%>%filter(between(value, -1.96,1.96))
+t_low$variable
+```
 
 ```{r}
-# We choose to delete the following 3 variables
-delete <- names(low) %in% c("V2", "V4","V9", "V14")
+# We choose to delete the following variables
+delete <- names(low) %in% c("V2", "V4","V8","V9","V11","V14","V16","V20")
 low_delete <- low[!delete]
 # calculate the mean of each column
 low_delete_mean <- colMeans(low_delete)
@@ -78,7 +88,7 @@ low_delete_diff <- low_delete %>%
 
 ATE_low_selected <- lm(Y~., data = low_delete_diff , weights = low_delete$weight.ATE)
 summary(ATE_low_selected)
-#ATE= 3.09
+#ATE= 2.788
 ```
 
 ## HighDim Dataset
