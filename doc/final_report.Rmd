@@ -1,0 +1,688 @@
+---
+title: "Final_Report"
+author: "Group_7"
+date: "2020/11/30"
+output: html_document
+---
+## Overview
+Summary Table
+
+#### Step 0.1 Load Required Paackages
+```{r message=FALSE}
+packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse")
+# check packages that need to be installed.
+packages.needed <- setdiff(packages.used, 
+                           intersect(installed.packages()[,1], 
+                                     packages.used))
+# install additional packages
+if(length(packages.needed) > 0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+library(grDevices)
+library(glmnet)
+library(rpart)
+library(gbm)
+library(MatchIt)
+library(readr)
+library(dplyr)
+library(reshape2)
+library(tidyverse)
+```
+
+
+#### Step 0.2 Import Data
+```{r,echo=FALSE,results = FALSE,message = FALSE}
+path = '../data/'
+highdim = read_csv(paste0(path, 'highDim_dataset.csv')) #2000  187
+lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
+```
+
+### 1. Propensity Score Estimation
+We define the propensity score as:
+$$e(x) = Pr(T =1|X=x)$$
+We assume that: 
+$$0<e(x)<1$$
+for all x, here we denote X as the covariates of p-dimensional vector of pre-treatment variables.
+
+#### 1.1 Without Oversampling for Imbalanced Classification
+##### 1.1.1 Estimate by Logistic Regression
+The logistic Regression model represents the class conditional probabilities through a linear function of the predictors:
+$$ logit[Pr(T=1|X)] = \beta_0+\beta_1x_1+...+\beta_px_p$$ 
+$$Pr(T=1|X)=\frac{1}{1+e^{-(\beta_0+\beta_1x_1+...+\beta_px_p)}}$$
+**High dimensional data:**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+prop.fit.high_log_reg <- highdim[, setdiff(names(highdim), 'Y')]
+start.time_ps_high_log_reg <- Sys.time()
+prop.out.high_log_reg <- glm(A ~., data = prop.fit.high_log_reg,family = binomial(logit))
+pscore_log_reg_h <-  prop.out.high_log_reg$fitted
+end.time_ps_high_log_reg <- Sys.time()
+high_cp_log_reg <- highdim
+high_cp_log_reg$pscore=pscore_log_reg_h
+time_ps_high_log_reg <- end.time_ps_high_log_reg - start.time_ps_high_log_reg
+cat("Processing time of propensity score estimation by Logistic Regression for high dimensional data is" ,time_ps_high_log_reg, "seconds.")
+```
+```{r,echo = FALSE, results = TRUE}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,4),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==1]),col='red')
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,4),xlim=c(0,1),add=TRUE)
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==0]),col='blue')
+```
+
+**Low dimensional data:**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+prop.fit.low_log_reg <- lowdim[, setdiff(names(lowdim), 'Y')]
+start.time_ps_low_log_reg <- Sys.time()
+prop.out.low_log_reg <- glm(A ~., data = prop.fit.low_log_reg,family = binomial(logit))
+pscore_log_reg_l <-  prop.out.low_log_reg$fitted
+end.time_ps_low_log_reg <- Sys.time()
+low_cp_log_reg <- lowdim
+low_cp_log_reg$pscore=pscore_log_reg_l
+time_ps_low_log_reg <- end.time_ps_low_log_reg - start.time_ps_low_log_reg
+cat("Processing time of propensity score estimation by Logistic Regression for low dimensional data is" ,time_ps_low_log_reg, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==1]),col='red')
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==0]),col='blue')
+```
+
+##### 1.1.2 Estimate by L1 Penalized Logistic Regression 
+Regularization term is introduced to decrease the model variance in the loss function $Q$ in order to avoid overfitting of logistic regression model. For both L1 and L2 Penalized Logistic Regression, we modifying the loss function with a penalty term which effectively shrinks the estimates of the coefficients. 
+
+Lasso Regression (Least Absolute Shrinkage and Selection Operator) with L1 norm penalty term, adds “absolute value of magnitude” of coefficient as penalty term to the loss function.
+$$Q = -\frac{1}{n}\sum_{i=1}^{n}[y_i(\beta_0+\beta_1x_{i1}+...+\beta_px_{ip})+log(1+exp(\beta_0+\beta_1x_{i1}+...+\beta_px_{ip}))]+ \lambda\sum_{j=1}^{p}|\beta_j|$$ where $Y \in \{0,1\}$
+
+**High Dimension Data**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.high_l1 <- highdim[, setdiff(names(highdim), 'Y')]
+x_l1 <- model.matrix(A~.,prop.fit.high_l1)[,-1]
+y_l1 <- prop.fit.high_l1$A
+cv.lasso <- cv.glmnet(x_l1, y_l1, alpha = 1, family = "binomial")
+start.time_ps_high_l1 <- Sys.time()
+prop.out.high_l1 <- glmnet(x_l1, y_l1, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+logit.pred_l1 <- predict(prop.out.high_l1, newx=x_l1)
+pscore_l1_h <- 1 / (1 + exp(-logit.pred_l1))
+end.time_ps_high_l1 <- Sys.time()
+high_cp_l1 <- highdim
+high_cp_l1$pscore = as.vector(pscore_l1_h)
+time_ps_high_l1 <- end.time_ps_high_l1 - start.time_ps_high_l1
+cat("Processing time of propensity score estimation by L1 Penalized Logistic Regression for high dimensional data is" ,time_ps_high_l1, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+hist(high_cp_l1$pscore[high_cp_l1$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_l1$pscore[high_cp_l1$A==1]),col='red')
+hist(high_cp_l1$pscore[high_cp_l1$A==0],breaks=40,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),add=TRUE)
+lines(density(high_cp_l1$pscore[high_cp_l1$A==0]),col='blue')
+```
+
+**Low Dimension Data**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_l1 <- lowdim[, setdiff(names(lowdim), 'Y')]
+x_l1 <- model.matrix(A~.,prop.fit.low_l1)[,-1]
+y_l1 <- prop.fit.low_l1$A
+cv.lasso <- cv.glmnet(x_l1, y_l1, alpha = 1, family = "binomial")
+start.time_ps_low_l1 <- Sys.time()
+prop.out.low_l1 <- glmnet(x_l1, y_l1, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+logit.pred_l1 <- predict(prop.out.low_l1, newx=x_l1)
+pscore_l1_l <- 1 / (1 + exp(-logit.pred_l1))
+end.time_ps_low_l1 <- Sys.time()
+low_cp_l1 <- lowdim
+low_cp_l1$pscore = as.vector(pscore_l1_l)
+time_ps_low_l1 <- end.time_ps_low_l1 - start.time_ps_low_l1
+cat("Processing time of propensity score estimation by L1 Penalized Logistic Regression for low dimensional data is" ,time_ps_low_l1, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+hist(low_cp_l1$pscore[low_cp_l1$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l1$pscore[low_cp_l1$A==1]),col='red')
+hist(low_cp_l1$pscore[low_cp_l1$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,8),add=TRUE)
+lines(density(low_cp_l1$pscore[low_cp_l1$A==0]),col='blue')
+```
+
+##### 1.1.3 Estimate by L2 Penalized Logistic Regression 
+Ridge regression with L2 norm penalty term adds “squared magnitude” of coefficient as penalty term to the loss function. 
+$$Q = -\frac{1}{n}\sum_{i=1}^{n}[y_i(\beta_0+\beta_1x_{i1}+...+\beta_px_{ip})+log(1+exp(\beta_0+\beta_1x_{i1}+...+\beta_px_{ip}))]+ \lambda\sum_{j=1}^{p}{\beta_j}^2$$
+
+**High Dimension Data**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.high_l2 <- highdim[, setdiff(names(highdim), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.high_l2)[,-1]
+y_l2 <- prop.fit.high_l2$A
+cv.ridge <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+start.time_ps_high_l2 <- Sys.time()
+prop.out.high_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge$lambda.min)
+logit.pred_l2 <- predict(prop.out.high_l2, newx=x_l2)
+pscore_l2_h <- 1 / (1 + exp(-logit.pred_l2))
+end.time_ps_high_l2 <- Sys.time()
+high_cp_l2 <- highdim
+high_cp_l2$pscore = as.vector(pscore_l2_h)
+time_ps_high_l2 <- end.time_ps_high_l2 - start.time_ps_high_l2
+cat("Processing time of propensity score estimation by L2 Penalized Logistic Regression for high dimensional data is" ,time_ps_high_l2, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_l2$pscore[high_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_l2$pscore[high_cp_l2$A==1]),col='red')
+hist(high_cp_l2$pscore[high_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),add=TRUE)
+lines(density(high_cp_l2$pscore[high_cp_l2$A==0]),col='blue')
+```
+
+**Low Dimension Data**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_l2 <- lowdim[, setdiff(names(lowdim), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.low_l2)[,-1]
+y_l2 <- prop.fit.low_l2$A
+cv.ridge <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+start.time_ps_low_l2 <- Sys.time()
+prop.out.low_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge$lambda.min)
+logit.pred_l2 <- predict(prop.out.low_l2, newx=x_l2)
+pscore_l2_l <- 1 / (1 + exp(-logit.pred_l2))
+end.time_ps_low_l2 <- Sys.time()
+low_cp_l2 <- lowdim
+low_cp_l2$pscore = as.vector(pscore_l2_l)
+time_ps_low_l2 <- end.time_ps_low_l2 - start.time_ps_low_l2
+cat("Processing time of propensity score estimation by L2 Penalized Logistic Regression for low dimensional data is" ,time_ps_high_l2, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+hist(low_cp_l2$pscore[low_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l2$pscore[low_cp_l2$A==1]),col='red')
+hist(low_cp_l2$pscore[low_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),add=TRUE)
+lines(density(low_cp_l2$pscore[low_cp_l2$A==0]),col='blue')
+```
+
+##### 1.1.4 Estimate by Regression Trees (CART)
+Classification and regression trees could use decision tree model and provide probability of class membership. We first split the space into two regions, and model the response by the mean of $Y$ in each region. We choose the variable and split-point to achieve the best fit. Then one or both of these regions are split into two more regions, and this process in continued, until some stopping rule is applied. The corresponding regression model predicts $Y$ with a constant $c_m$ in region $R_m$, that is, $$\hat{f(x)} = \sum_{m=1}^{M}c_mI\{x \in R_m\}$$
+
+**High Dimension Data**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.high_cart <- highdim[, setdiff(names(highdim), 'Y')]
+high_cart <- rpart(A~., data=prop.fit.high_cart, method="class")
+best_cp_high <- high_cart$cptable[which.min(high_cart$cptable[,"xerror"]),"CP"]
+start.time_ps_high_CART <- Sys.time()
+prop.out.high_cart <- rpart(A~., data=prop.fit.high_cart, method="class",cp=best_cp_high, parms = list(split = "information"))
+pscore_cart_h <- predict(prop.out.high_cart,type='prob')[,2]
+end.time_ps_high_CART <- Sys.time()
+high_cp_cart<- highdim
+high_cp_cart$pscore=pscore_cart_h
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.high_cart)
+text(prop.out.high_cart, digits = 4)
+time_ps_high_CART <- end.time_ps_high_CART - start.time_ps_high_CART
+cat("Processing time of propensity score estimation by Regression Trees (CART) for high dimensional data is" ,time_ps_high_CART, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_cart$pscore[high_cp_cart$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,35),xlim=c(0.3,0.65),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_cart$pscore[high_cp_cart$A==1]),col='red')
+hist(high_cp_cart$pscore[high_cp_cart$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,35),xlim=c(0.3,0.65),add=TRUE)
+lines(density(high_cp_cart$pscore[high_cp_cart$A==0]),col='blue')
+```
+
+**Low Dimension Data**
+```{r,echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_cart <- lowdim[, setdiff(names(lowdim), 'Y')]
+low_cart <- rpart(A~., data=prop.fit.low_cart, method="class")
+best_cp_low <- low_cart$cptable[which.min(low_cart$cptable[,"xerror"]),"CP"]
+start.time_ps_low_CART <- Sys.time()
+prop.out.low_cart <- rpart(A~., data=prop.fit.low_cart, method="class",cp=best_cp_low, parms = list(split = "information"))
+pscore_cart_l <- predict(prop.out.low_cart, type='prob')[,2]
+end.time_ps_low_CART <- Sys.time()
+low_cp_cart<- lowdim
+low_cp_cart$pscore=pscore_cart_l
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.low_cart)
+text(prop.out.low_cart, digits = 4)
+time_ps_low_CART <- end.time_ps_low_CART - start.time_ps_low_CART
+cat("Processing time of propensity score estimation by Regression Trees (CART) for low dimensional data is" ,time_ps_low_CART, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+hist(low_cp_cart$pscore[low_cp_cart$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,15),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_cart$pscore[low_cp_cart$A==1]),col='red')
+hist(low_cp_cart$pscore[low_cp_cart$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,15),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_cart$pscore[low_cp_cart$A==0]),col='blue')
+```
+
+##### 1.1.5 Estimate by Boosting Stumps
+We can represent the boosting stumps model as an addictive model: $$f_M(x) = \sum_{m=1}^{M}T(x;\Theta_m)$$
+where $T(x;\theta)$ is the stump, $\Theta_m$ is the parameter of the tree stump, $M$ is the number of tree stumps.
+
+**High Dimension Data**
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.high_bs <- highdim[, setdiff(names(highdim), 'Y')]
+gbmWithCrossValidation_high <-  gbm(formula = A~.,
+                             distribution = "bernoulli",
+                             data = prop.fit.high_bs,
+                             n.trees = 1000,
+                             shrinkage = 0.01,
+                             n.minobsinnode = 20, 
+                             interaction.depth=1,
+                             train.fraction=1.0,
+                             cv.folds = 5,
+                             n.cores = 1)
+bestTreeForPrediction_high <-  gbm.perf(gbmWithCrossValidation_high,plot.it=FALSE)
+
+start.time_ps_high_BS <- Sys.time()
+gbm1 <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.high_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=bestTreeForPrediction_high,            # runs for 500 iterations       
+            shrinkage=0.01,         # sets the shrinkage parameter       
+            interaction.depth=1,      # addictive model      
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=20
+            )        # minimum node size for trees 
+
+pscore_bs_h <-  1 / (1 + exp(-gbm1$fit))
+end.time_ps_high_BS <- Sys.time()
+high_cp_bs <- highdim
+high_cp_bs$pscore=pscore_bs_h
+time_ps_high_BS <- end.time_ps_high_BS - start.time_ps_high_BS
+cat("Processing time of propensity score estimation by Boosting Stumps for high dimensional data is" ,time_ps_high_BS, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_bs$pscore[high_cp_bs$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_bs$pscore[high_cp_bs$A==1]),col='red')
+hist(high_cp_bs$pscore[high_cp_bs$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),add=TRUE)
+lines(density(high_cp_bs$pscore[high_cp_bs$A==0]),col='blue')
+```
+
+**Low Dimension Data**
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_bs <- lowdim[, setdiff(names(lowdim), 'Y')]
+gbmWithCrossValidation_low = gbm(formula = A~.,
+                             distribution = "bernoulli",
+                             data = prop.fit.low_bs,
+                             n.trees = 500,
+                             shrinkage = 0.01,
+                             n.minobsinnode = 20, 
+                             interaction.depth=1,
+                             train.fraction=1.0,
+                             cv.folds = 5,
+                             n.cores = 1)
+bestTreeForPrediction_low = gbm.perf(gbmWithCrossValidation_low,plot.it=FALSE)
+
+start.time_ps_low_BS <- Sys.time()
+gbm2 <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.low_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=bestTreeForPrediction_low,            # runs for 95 iterations       
+            shrinkage=0.01,         # sets the shrinkage parameter       
+            interaction.depth=1,      # maximum allowed interaction degree       
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=20)        # minimum node size for trees 
+
+pscore_bs_l <-  1 / (1 + exp(-gbm2$fit))
+end.time_ps_low_BS <- Sys.time()
+low_cp_bs <- lowdim
+low_cp_bs$pscore=pscore_bs_l  
+time_ps_low_BS <- end.time_ps_low_BS - start.time_ps_low_BS
+cat("Processing time of propensity score estimation by Boosting Stumps for low dimensional data is" ,time_ps_low_BS, "seconds.")
+```
+
+```{r,echo = FALSE, results = TRUE}
+hist(low_cp_bs$pscore[low_cp_bs$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,16),xlim=c(0.05,0.6),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_bs$pscore[low_cp_bs$A==1]),col='red')
+hist(low_cp_bs$pscore[low_cp_bs$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,16),xlim=c(0.05,0.6),add=TRUE)
+lines(density(low_cp_bs$pscore[low_cp_bs$A==0]),col='blue')
+```
+
+#### 1.2 Oversampling for Imbalanced Classification
+Since the treatment classification (A) ratio is $1103 (0) : 897 (1) = 1.229654$ in high dimension data, and the treatment classification (A) ratio is $363 (0) : 112 (1) = 3.241071$ in low dimension data. We decided to use Synthetic Minority Oversampling Technique to generate synthetic positive instances using SMOTE algorithm only on low dimension data. After oversampling, the treatment classification (A) ratio is $363 (0) : 336 (1) = 1.080357$ in low dimension data.
+
+
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+library(smotefamily)
+low_balanced_smote <- SMOTE(lowdim[,-2],lowdim[,2],dup_size=2)$data %>% mutate(A = as.numeric(class)) %>%select(-class)
+```
+
+##### 1.2.1 Estimate by Logistic Regression
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+prop.fit.low_balanced_smote_log_reg <- low_balanced_smote[, setdiff(names(low_balanced_smote), 'Y')]
+start.time_ps_low_balanced_smote_log_reg <- Sys.time()
+prop.out.low_balanced_smote_log_reg <- glm(A ~., data = prop.fit.low_balanced_smote_log_reg,family = binomial(logit))
+pscore_log_reg_low_balanced_smote <-  prop.out.low_balanced_smote_log_reg$fitted
+end.time_ps_low_balanced_smote_log_reg <- Sys.time()
+low_balanced_smote_cp_log_reg <- low_balanced_smote
+low_balanced_smote_cp_log_reg$pscore=pscore_log_reg_low_balanced_smote
+time_ps_low_balanced_smote_log_reg <- end.time_ps_low_balanced_smote_log_reg - start.time_ps_low_balanced_smote_log_reg
+cat("Processing time of propensity score estimation by Logistic Regression for balanced low dimensional data is" ,time_ps_low_balanced_smote_log_reg, "seconds.")
+
+par(mfrow=c(1,2))
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==1]),col='red')
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==0]),col='blue')
+
+hist(low_balanced_smote_cp_log_reg$pscore[low_balanced_smote_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_balanced_smote_cp_log_reg$pscore[low_balanced_smote_cp_log_reg$A==1]),col='red')
+hist(low_balanced_smote_cp_log_reg$pscore[low_balanced_smote_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),add=TRUE)
+lines(density(low_balanced_smote_cp_log_reg$pscore[low_balanced_smote_cp_log_reg$A==0]),col='blue')
+
+```
+
+##### 1.2.2 Estimate by L1 Penalized Logistic Regression 
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+# L1 Penalized Logistic Regression
+set.seed(0)
+prop.fit.low_balanced_smote_l1 <- low_balanced_smote[, setdiff(names(low_balanced_smote), 'Y')]
+x_l1 <- model.matrix(A~.,prop.fit.low_balanced_smote_l1)[,-1]
+y_l1 <- prop.fit.low_balanced_smote_l1$A
+cv.lasso_low_balanced_smote <- cv.glmnet(x_l1, y_l1, alpha = 1, family = "binomial")
+start.time_ps_low_balanced_smote_l1 <- Sys.time()
+prop.out.low_balanced_smote_l1 <- glmnet(x_l1, y_l1, alpha = 1, family = "binomial", lambda = cv.lasso_low_balanced_smote$lambda.min)
+logit.pred_l1_low_balanced_smote <- predict(prop.out.low_balanced_smote_l1, newx=x_l1)
+pscore_l1_low_balanced_smote <- 1 / (1 + exp(-logit.pred_l1_low_balanced_smote))
+end.time_ps_low_balanced_smote_l1 <- Sys.time()
+low_balanced_smote_cp_l1 <- low_balanced_smote
+low_balanced_smote_cp_l1$pscore = as.vector(pscore_l1_low_balanced_smote)
+time_ps_low_balanced_smote_l1 <- end.time_ps_low_balanced_smote_l1 - start.time_ps_low_balanced_smote_l1
+cat("Processing time of propensity score estimation by L1 Penalized Logistic Regression for balanced low dimensional data is" ,time_ps_low_balanced_smote_l1, "seconds.")
+
+par(mfrow=c(1,2))
+hist(low_cp_l1$pscore[low_cp_l1$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l1$pscore[low_cp_l1$A==1]),col='red')
+hist(low_cp_l1$pscore[low_cp_l1$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,8),add=TRUE)
+lines(density(low_cp_l1$pscore[low_cp_l1$A==0]),col='blue')
+
+hist(low_balanced_smote_cp_l1$pscore[low_balanced_smote_cp_l1$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_balanced_smote_cp_l1$pscore[low_balanced_smote_cp_l1$A==1]),col='red')
+hist(low_balanced_smote_cp_l1$pscore[low_balanced_smote_cp_l1$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,8),add=TRUE)
+lines(density(low_balanced_smote_cp_l1$pscore[low_balanced_smote_cp_l1$A==0]),col='blue')
+
+```
+
+##### 1.2.3 Estimate by L2 Penalized Logistic Regression 
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_balanced_smote_l2 <- low_balanced_smote[, setdiff(names(low_balanced_smote), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.low_balanced_smote_l2)[,-1]
+y_l2 <- prop.fit.low_balanced_smote_l2$A
+cv.ridge_low_balanced_smote <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+start.time_ps_low_balanced_smote_l2 <- Sys.time()
+prop.out.low_balanced_smote_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge_low_balanced_smote$lambda.min)
+logit.pred_l2_low_balanced_smote <- predict(prop.out.low_balanced_smote_l2, newx=x_l2)
+pscore_l2_low_balanced_smote <- 1 / (1 + exp(-logit.pred_l2_low_balanced_smote))
+end.time_ps_low_balanced_smote_l2 <- Sys.time()
+low_balanced_smote_cp_l2 <- low_balanced_smote
+low_balanced_smote_cp_l2$pscore = as.vector(pscore_l2_low_balanced_smote)
+time_ps_low_balanced_smote_l2 <- end.time_ps_low_balanced_smote_l2 - start.time_ps_low_balanced_smote_l2
+cat("Processing time of propensity score estimation by L2 Penalized Logistic Regression for balanced low dimensional data is" ,time_ps_low_balanced_smote_l2, "seconds.")
+
+par(mfrow=c(1,2))
+hist(low_cp_l2$pscore[low_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l2$pscore[low_cp_l2$A==1]),col='red')
+hist(low_cp_l2$pscore[low_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),add=TRUE)
+lines(density(low_cp_l2$pscore[low_cp_l2$A==0]),col='blue')
+
+hist(low_balanced_smote_cp_l2$pscore[low_balanced_smote_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_balanced_smote_cp_l2$pscore[low_balanced_smote_cp_l2$A==1]),col='red')
+hist(low_balanced_smote_cp_l2$pscore[low_balanced_smote_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,1),add=TRUE)
+lines(density(low_balanced_smote_cp_l2$pscore[low_balanced_smote_cp_l2$A==0]),col='blue')
+```
+
+##### 1.2.4 Estimate by Regression Trees (CART)
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_balanced_smote_cart <- low_balanced_smote[, setdiff(names(low_balanced_smote), 'Y')]
+low_balanced_smote_cart <- rpart(A~., data=prop.fit.low_balanced_smote_cart, method="class")
+best_cp_low_balanced_smote <- low_balanced_smote_cart$cptable[which.min(low_balanced_smote_cart$cptable[,"xerror"]),"CP"]
+start.time_ps_low_balanced_smote_CART <- Sys.time()
+prop.out.low_balanced_smote_cart <- rpart(A~., data=prop.fit.low_balanced_smote_cart, method="class",cp=best_cp_low_balanced_smote, parms = list(split = "information"))
+pscore_cart_low_balanced_smote <- predict(prop.out.low_balanced_smote_cart, type='prob')[,2]
+end.time_ps_low_balanced_smote_CART <- Sys.time()
+low_balanced_smote_cp_cart<- low_balanced_smote
+low_balanced_smote_cp_cart$pscore=pscore_cart_low_balanced_smote
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.low_balanced_smote_cart)
+text(prop.out.low_balanced_smote_cart, digits = 4)
+time_ps_low_balanced_smote_CART <- end.time_ps_low_balanced_smote_CART - start.time_ps_low_balanced_smote_CART
+cat("Processing time of propensity score estimation by Regression Trees (CART) for balanced low dimensional data is" ,time_ps_low_balanced_smote_CART, "seconds.")
+
+par(mfrow=c(1,2))
+hist(low_cp_cart$pscore[low_cp_cart$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,15),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_cart$pscore[low_cp_cart$A==1]),col='red')
+hist(low_cp_cart$pscore[low_cp_cart$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,15),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_cart$pscore[low_cp_cart$A==0]),col='blue')
+
+hist(low_balanced_smote_cp_cart$pscore[low_balanced_smote_cp_cart$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,15),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_balanced_smote_cp_cart$pscore[low_balanced_smote_cp_cart$A==1]),col='red')
+hist(low_balanced_smote_cp_cart$pscore[low_balanced_smote_cp_cart$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,15),xlim=c(0,1),add=TRUE)
+lines(density(low_balanced_smote_cp_cart$pscore[low_balanced_smote_cp_cart$A==0]),col='blue')
+
+```
+
+##### 1.2.5 Estimate by Boosting Stumps
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+set.seed(0)
+prop.fit.low_balanced_smote_bs <- low_balanced_smote[, setdiff(names(low_balanced_smote), 'Y')]
+gbmWithCrossValidation_low_balanced_smote = gbm(formula = A~.,
+                             distribution = "bernoulli",
+                             data = prop.fit.low_balanced_smote_bs,
+                             n.trees = 500,
+                             shrinkage = 0.01,
+                             n.minobsinnode = 20, 
+                             interaction.depth=1,
+                             train.fraction=1.0,
+                             cv.folds = 5,
+                             n.cores = 1)
+bestTreeForPrediction_low_balanced_smote = gbm.perf(gbmWithCrossValidation_low_balanced_smote,plot.it=FALSE)
+
+start.time_ps_low_balanced_smote_BS <- Sys.time()
+gbm2_low_balanced_smote <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.low_balanced_smote_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=bestTreeForPrediction_low_balanced_smote,            # runs for 95 iterations       
+            shrinkage=0.01,         # sets the shrinkage parameter       
+            interaction.depth=1,      # maximum allowed interaction degree       
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=20)        # minimum node size for trees 
+
+pscore_bs_low_balanced_smote <-  1 / (1 + exp(-gbm2_low_balanced_smote$fit))
+end.time_ps_low_balanced_smote_BS <- Sys.time()
+low_balanced_smote_cp_bs <- low_balanced_smote
+low_balanced_smote_cp_bs$pscore=pscore_bs_low_balanced_smote 
+time_ps_low_balanced_smote_BS <- end.time_ps_low_balanced_smote_BS - start.time_ps_low_balanced_smote_BS
+cat("Processing time of propensity score estimation by Boosting Stumps for balanced low dimensional data is" ,time_ps_low_balanced_smote_BS, "seconds.")
+
+par(mfrow=c(1,2))
+hist(low_cp_bs$pscore[low_cp_bs$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,16),xlim=c(0.05,0.6),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_bs$pscore[low_cp_bs$A==1]),col='red')
+hist(low_cp_bs$pscore[low_cp_bs$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,16),xlim=c(0.05,0.6),add=TRUE)
+lines(density(low_cp_bs$pscore[low_cp_bs$A==0]),col='blue')
+
+hist(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,16),xlab="Propensity Score", ylab="",main="")
+lines(density(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==1]),col='red')
+hist(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,16),add=TRUE)
+lines(density(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==0]),col='blue')
+```
+
+### 2. Propensity Score Matching
+introduce full matching
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+library(tidyverse)
+full_matching_ate <- function(dat,propensity_score){
+  match_full_low<-matchit(A~.-Y,data=dat,method="full",estimand = "ATE",
+                          distance = propensity_score)
+  data.fullMatching <- match.data(match_full_low)
+  data.fullMatching$Y <- dat$Y
+  a = data.fullMatching %>% group_by(subclass,A) %>% summarise(mean_y = mean(Y), .groups = 'drop')
+  group_ate = a %>% group_by(subclass) %>% summarise(treat_eff = mean_y[A == 1] - mean_y[A == 0], .groups = 'drop')
+  group_n = data.fullMatching %>% group_by(subclass) %>% count()
+  ate = sum(group_ate$treat_eff*group_n$n/nrow(dat))
+  return(ate)
+}
+```
+
+```{r, echo = FALSE, results = TRUE, message=FALSE}
+start.time_a <- Sys.time()
+a <- full_matching_ate(highdim,pscore_log_reg_h)
+end.time_a <- Sys.time()
+time_a <- as.numeric(end.time_a - start.time_a)
+start.time_b <- Sys.time()
+b <- full_matching_ate(lowdim,pscore_log_reg_l)
+end.time_b <- Sys.time()
+time_b <- as.numeric(end.time_b - start.time_b)
+start.time_B <- Sys.time()
+B <- full_matching_ate(low_balanced_smote,pscore_log_reg_low_balanced_smote)
+end.time_B <- Sys.time()
+time_B <- as.numeric(end.time_B - start.time_B)
+start.time_c <- Sys.time()
+c <- full_matching_ate(highdim,pscore_l1_h[,1])
+end.time_c <- Sys.time()
+time_c <- as.numeric(end.time_c - start.time_c)
+start.time_d <- Sys.time()
+d <- full_matching_ate(lowdim,pscore_l1_l[,1])
+end.time_d <- Sys.time()
+time_d <- as.numeric(end.time_d - start.time_d)
+
+start.time_D <- Sys.time()
+D <- full_matching_ate(low_balanced_smote,pscore_l1_low_balanced_smote[,1])
+end.time_D <- Sys.time()
+time_D <- as.numeric(end.time_D - start.time_D)
+
+start.time_e <- Sys.time()
+e <- full_matching_ate(highdim,pscore_l2_h[,1])
+end.time_e <- Sys.time()
+time_e <- as.numeric(end.time_e - start.time_e)
+
+start.time_f <- Sys.time()
+f <- full_matching_ate(lowdim,pscore_l2_l[,1])
+end.time_f <- Sys.time()
+time_f <- as.numeric(end.time_f - start.time_f)
+
+start.time_FF <- Sys.time()
+FF <- full_matching_ate(low_balanced_smote,pscore_l2_low_balanced_smote[,1])
+end.time_FF <- Sys.time()
+time_FF <- as.numeric(end.time_FF - start.time_FF)
+
+start.time_g <- Sys.time()
+g <- full_matching_ate(highdim,pscore_cart_h)
+end.time_g <- Sys.time()
+time_g <- as.numeric(end.time_g - start.time_g)
+
+start.time_h <- Sys.time()
+h <- full_matching_ate(lowdim,pscore_cart_l)
+end.time_h <- Sys.time()
+time_h <- as.numeric(end.time_h - start.time_h)
+
+start.time_H <- Sys.time()
+H <- full_matching_ate(low_balanced_smote,pscore_cart_low_balanced_smote)
+end.time_H <- Sys.time()
+time_H <- as.numeric(end.time_H - start.time_H)
+
+start.time_i <- Sys.time()
+i <- full_matching_ate(highdim,pscore_bs_h)
+end.time_i <- Sys.time()
+time_i <- as.numeric(end.time_i - start.time_i)
+
+start.time_j <- Sys.time()
+j <- full_matching_ate(lowdim,pscore_bs_l)
+end.time_j <- Sys.time()
+time_j <- as.numeric(end.time_j - start.time_j)
+
+start.time_J <- Sys.time()
+J <- full_matching_ate(low_balanced_smote,pscore_bs_low_balanced_smote)
+end.time_J <- Sys.time()
+time_J <- as.numeric(end.time_J - start.time_J)
+
+
+data.frame(Logistic = c(a,b,B),L1 = c(c,d,D),L2 = c(e,f,FF),CART = c(g,h,H),BS = c(i,j,J),row.names = c("highdim","lowdim","balanced lowdim"))
+data.frame(Logistic = c(time_a,time_b,time_B),L1 = c(time_c,time_d,time_D),L2 = c(time_e,time_f,time_FF),CART = c(time_g,time_h,time_H),BS = c(time_i,time_j,time_J),row.names = c("highdim","lowdim","balanced lowdim"))
+
+```
+
+
+
+### 3. Weighted Regression
+introduce weighted regression
+
+#### 3.1 Estimate by Logistic Regression + Weighted Regression 
+
+
+### Summary
+
+### References
+
+<https://github.com/TZstatsADS/ADS_Teaching/blob/master/Tutorials/wk10-overview-casual-inference-methods.pdf>
