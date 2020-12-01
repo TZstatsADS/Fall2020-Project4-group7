@@ -54,18 +54,20 @@ low_diff <- low %>%
 
 ATE_low <- lm(Y~., data = low_diff , weights = low$weight.ATE)
 summary(ATE_low)
+#ATE = 3.10
 ```
+
 ```{r}
 # select variables by weighted regression
-weighted_lr_low <- lm(Y~.-psvalue-weight.ATE, data = low)
-summary(weighted_lr_low)
+lr_low <- lm(Y~.-psvalue-weight.ATE, data = low)
+summary(lr_low)
 
-# result shows we should not include v2, v4,v9, v14
+# result shows we should not include v2, v4, v9, v14
 ```
 
 ```{r}
 # We choose to delete the following 3 variables
-delete <- names(low) %in% c("V2", "V4", "V14")
+delete <- names(low) %in% c("V2", "V4","V9", "V14")
 low_delete <- low[!delete]
 # calculate the mean of each column
 low_delete_mean <- colMeans(low_delete)
@@ -76,6 +78,7 @@ low_delete_diff <- low_delete %>%
 
 ATE_low_selected <- lm(Y~., data = low_delete_diff , weights = low_delete$weight.ATE)
 summary(ATE_low_selected)
+#ATE= 3.09
 ```
 
 ## HighDim Dataset
@@ -116,30 +119,13 @@ high_diff <- high %>%
 
 ATE_high <- lm(Y~., data = high_diff , weights = high$weight.ATE)
 summary(ATE_high)
-#-4.674
+#-4.673
 ```
 
 
 ```{r}
-# select variables by weighted regression
+# select variables by regression
 # selected by set t less than 1.96 or larger than 1.96
-weighted_lr_high <- lm(Y~.-psvalue-weight.ATE, data = high, weights = high$weight.ATE)
-summary(weighted_lr_high)
-
-# result shows we should include:
-select <- names(high)%in% c('Y','A','V10', 'V28', 'V45', 'V91', 'V100','V102', 'V133', 'V138', 'V148', 'V150', 'V180')
-high_delete <-high[select]
-# calculate the mean of each column
-high_delete_mean <- colMeans(high_delete)
-# Add columns of treatment effect
-high_delete_diff <- high_delete %>% 
-  mutate_at(list(mean_diff = (~.*high_delete$A - high_delete_mean*high_delete$A)), .vars = vars(starts_with("V")))
-
-ATE_high_selected <- lm(Y~., data = high_delete_diff , weights = high$weight.ATE)
-summary(ATE_high_selected)
-```
-
-```{r}
 t_high=list()
 for (i in names(high)){
   t_high[[i]] <- summary(lm(Y~get(i), high))[["coefficients"]][2, "t value"]
@@ -148,7 +134,7 @@ t_high = data.frame(t_high)%>%melt()%>%filter(between(value, -1.96,1.96))
 t_high$variable
 ```
 ```{r}
-# We choose to delete the following 3 variables
+# We choose to delete the following variables
 delete1 <- names(high) %in% c('V1','V2','V4','V5','V8','V9','V13','V15','V18','V28','V29','V34','V36','V39','V41','V42','V43','V44','V47','V49','V50','V52','V53','V54','V55','V57','V58','V59','V97','V151')
 high_delete <- high[!delete1]
 # calculate the mean of each column
@@ -160,6 +146,7 @@ high_delete_diff <- high_delete %>%
 
 ATE_high_selected <- lm(Y~., data = high_delete_diff , weights = high_delete$weight.ATE)
 summary(ATE_high_selected)
+#ATE = -4.135
 ```
 
 
