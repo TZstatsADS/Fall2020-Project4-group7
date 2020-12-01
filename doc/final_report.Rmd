@@ -9,7 +9,7 @@ Summary Table
 
 #### Step 0.1 Load Required Paackages
 ```{r message=FALSE}
-packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse")
+packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse","optmatch")
 # check packages that need to be installed.
 packages.needed <- setdiff(packages.used, 
                            intersect(installed.packages()[,1], 
@@ -677,6 +677,7 @@ data.frame(Logistic = c(time_a,time_b,time_B),L1 = c(time_c,time_d,time_D),L2 = 
 
 ### 3. Weighted Regression
 introduce weighted regression
+
 
 #### 3.1 Estimate by Logistic Regression + Weighted Regression 
 
