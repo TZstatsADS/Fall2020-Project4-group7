@@ -1,0 +1,68 @@
+---
+title: "PS_Estimation_Logistic_Regression_Yunuo"
+author: "Yunuo Ma"
+date: "11/30/2020"
+output: pdf_document
+---
+```{r}
+rm(list=ls())
+packages.used <- c("grDevices")
+# check packages that need to be installed.
+packages.needed <- setdiff(packages.used, 
+                           intersect(installed.packages()[,1], 
+                                     packages.used))
+# install additional packages
+if(length(packages.needed) > 0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
+library(grDevices)
+```
+
+```{r}
+path = './data/'
+highdim = read_csv(paste0(path, 'highDim_dataset.csv')) #2000  187
+lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
+```
+
+## Logistic Regression
+### For High Dimension Data
+```{r}
+prop.fit.high_log_reg <- highdim[, setdiff(names(highdim), 'Y')]
+prop.out.high_log_reg <- glm(A ~., data = prop.fit.high_log_reg,family = binomial(logit))
+# summary(prop.out.high_log_reg)
+pscore_log_reg_h <-  prop.out.high_log_reg$fitted
+high_cp_log_reg <- highdim
+high_cp_log_reg$pscore=pscore_log_reg_h
+```
+
+```{r}
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==1]),col='red')
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0,1),add=TRUE)
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+prop.fit.low_log_reg <- lowdim[, setdiff(names(lowdim), 'Y')]
+prop.out.low_log_reg <- glm(A ~., data = prop.fit.low_log_reg,family = binomial(logit))
+pscore_log_reg_l <-  prop.out.low_log_reg$fitted
+low_cp_log_reg <- lowdim
+low_cp_log_reg$pscore=pscore_log_reg_l
+```
+
+```{r}
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==1]),col='red')
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==0]),col='blue')
+```
