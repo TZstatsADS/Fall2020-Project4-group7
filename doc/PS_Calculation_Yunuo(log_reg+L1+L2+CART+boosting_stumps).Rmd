@@ -1,0 +1,329 @@
+---
+title: "Proj4"
+author: "Yunuo Ma"
+date: "11/19/2020"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(tidyverse)
+library(MatchIt)
+library(optmatch)
+```
+
+```{r}
+setwd("/Users/stephanie/Documents/GitHub/Fall2020-Project4-group-7")
+path = './data/'
+highdim = read_csv(paste0(path, 'highDim_dataset.csv')) #2000  187
+lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
+```
+
+```{r}
+# highdim_matchit = matchit(A~.-Y, data=highdim, method='full', distance='logit')
+# match.data(highdim_matchit)
+# plot(summary(highdim_matchit),type='hist')
+```
+
+# Calculation for Propensity Scores
+## Logistic Regression
+### For High Dimension Data
+```{r}
+prop.fit.high_log_reg <- highdim[, setdiff(names(highdim), 'Y')]
+prop.out.high_log_reg <- glm(A ~., data = prop.fit.high_log_reg,family = binomial(logit))
+# summary(prop.out.high_log_reg)
+pscore_log_reg <-  prop.out.high_log_reg$fitted
+high_cp_log_reg <- highdim
+high_cp_log_reg$pscore=pscore_log_reg
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==1]),col='red')
+hist(high_cp_log_reg$pscore[high_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0,1),add=TRUE)
+lines(density(high_cp_log_reg$pscore[high_cp_log_reg$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+prop.fit.low_log_reg <- lowdim[, setdiff(names(lowdim), 'Y')]
+prop.out.low_log_reg <- glm(A ~., data = prop.fit.low_log_reg,family = binomial(logit))
+# summary(prop.out.high_log_reg)
+pscore_log_reg <-  prop.out.low_log_reg$fitted
+low_cp_log_reg <- lowdim
+low_cp_log_reg$pscore=pscore_log_reg
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==1],breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==1]),col='red')
+hist(low_cp_log_reg$pscore[low_cp_log_reg$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,7),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_log_reg$pscore[low_cp_log_reg$A==0]),col='blue')
+```
+
+## L1 Penalized Logistic Regression
+### For High Dimension Data
+```{r}
+library(glmnet)
+set.seed(0)
+prop.fit.high_l1 <- highdim[, setdiff(names(highdim), 'Y')]
+x_l1 <- model.matrix(A~.,prop.fit.high_l1)[,-1]
+y_l1 <- prop.fit.high_l1$A
+cv.lasso <- cv.glmnet(x_l1, y_l1, alpha = 1, family = "binomial")
+prop.out.high_l1 <- glmnet(x_l1, y_l1, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+logit.pred_l1 <- predict(prop.out.high_l1, newx=x_l1)
+pscore_l1 <- 1 / (1 + exp(-logit.pred_l1))
+high_cp_l1 <- highdim
+high_cp_l1$pscore = as.vector(pscore_l1)
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_l1$pscore[high_cp_l1$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_l1$pscore[high_cp_l1$A==1]),col='red')
+hist(high_cp_l1$pscore[high_cp_l1$A==0],breaks=40,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),add=TRUE)
+lines(density(high_cp_l1$pscore[high_cp_l1$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+library(glmnet)
+set.seed(0)
+prop.fit.low_l1 <- lowdim[, setdiff(names(lowdim), 'Y')]
+x_l1 <- model.matrix(A~.,prop.fit.low_l1)[,-1]
+y_l1 <- prop.fit.low_l1$A
+cv.lasso <- cv.glmnet(x_l1, y_l1, alpha = 1, family = "binomial")
+prop.out.low_l1 <- glmnet(x_l1, y_l1, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+logit.pred_l1 <- predict(prop.out.low_l1, newx=x_l1)
+pscore_l1 <- 1 / (1 + exp(-logit.pred_l1))
+low_cp_l1 <- lowdim
+low_cp_l1$pscore = as.vector(pscore_l1)
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(low_cp_l1$pscore[low_cp_l1$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l1$pscore[low_cp_l1$A==1]),col='red')
+hist(low_cp_l1$pscore[low_cp_l1$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,8),add=TRUE)
+lines(density(low_cp_l1$pscore[low_cp_l1$A==0]),col='blue')
+```
+
+## L2 Penalized Logistic Regression
+### For High Dimension Data
+```{r}
+library(glmnet)
+set.seed(0)
+prop.fit.high_l2 <- highdim[, setdiff(names(highdim), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.high_l2)[,-1]
+y_l2 <- prop.fit.high_l2$A
+cv.ridge <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+prop.out.high_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge$lambda.min)
+logit.pred_l2 <- predict(prop.out.high_l2, newx=x_l2)
+pscore_l2 <- 1 / (1 + exp(-logit.pred_l2))
+high_cp_l2 <- highdim
+high_cp_l2$pscore = as.vector(pscore_l2)
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_l2$pscore[high_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_l2$pscore[high_cp_l2$A==1]),col='red')
+hist(high_cp_l2$pscore[high_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,6),xlim=c(0.2,0.8),add=TRUE)
+lines(density(high_cp_l2$pscore[high_cp_l2$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+library(glmnet)
+set.seed(0)
+prop.fit.low_l2 <- lowdim[, setdiff(names(lowdim), 'Y')]
+x_l2 <- model.matrix(A~.,prop.fit.low_l2)[,-1]
+y_l2 <- prop.fit.low_l2$A
+cv.ridge <- cv.glmnet(x_l2, y_l2, alpha = 0, family = "binomial")
+prop.out.low_l2 <- glmnet(x_l2, y_l2, alpha = 0, family = "binomial", lambda = cv.ridge$lambda.min)
+logit.pred_l2 <- predict(prop.out.low_l2, newx=x_l2)
+pscore_l2 <- 1 / (1 + exp(-logit.pred_l2))
+low_cp_l2 <- lowdim
+low_cp_l2$pscore = as.vector(pscore_l2)
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(low_cp_l2$pscore[low_cp_l2$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_l2$pscore[low_cp_l2$A==1]),col='red')
+hist(low_cp_l2$pscore[low_cp_l2$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,10),xlim=c(0,0.8),add=TRUE)
+lines(density(low_cp_l2$pscore[low_cp_l2$A==0]),col='blue')
+```
+
+## Regression Trees (CART)
+### For High Dimension Data
+```{r}
+library(rpart)
+prop.fit.high_cart <- highdim[, setdiff(names(highdim), 'Y')]
+prop.out.high_cart <- rpart(A~., data=prop.fit.high_cart, method="class",parms = list(split = "information"))
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.high_cart)
+text(prop.out.high_cart, digits = 4)
+high_cp_cart<- highdim
+pscore_cart <- predict(prop.out.high_cart,type='prob')[,2]
+high_cp_cart$pscore=pscore_cart
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_cart$pscore[high_cp_cart$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,35),xlim=c(0.3,0.65),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_cart$pscore[high_cp_cart$A==1]),col='red')
+hist(high_cp_cart$pscore[high_cp_cart$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,35),xlim=c(0.3,0.65),add=TRUE)
+lines(density(high_cp_cart$pscore[high_cp_cart$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+prop.fit.low_cart <- lowdim[, setdiff(names(lowdim), 'Y')]
+prop.out.low_cart <- rpart(A~., data=prop.fit.low_cart, method="class",parms = list(split = "information"))
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.low_cart)
+text(prop.out.low_cart, digits = 4)
+low_cp_cart<- lowdim
+pscore_cart <- predict(prop.out.low_cart,type='prob')[,2]
+low_cp_cart$pscore=pscore_cart
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(low_cp_cart$pscore[low_cp_cart$A==1], breaks=40,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,35),xlim=c(0,1),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_cart$pscore[low_cp_cart$A==1]),col='red')
+hist(low_cp_cart$pscore[low_cp_cart$A==0],breaks=40,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,35),xlim=c(0,1),add=TRUE)
+lines(density(low_cp_cart$pscore[low_cp_cart$A==0]),col='blue')
+```
+
+## Boosting Stumps
+### For High Dimension Data
+```{r}
+library(gbm)
+set.seed(0)
+prop.fit.high_bs <- highdim[, setdiff(names(highdim), 'Y')]
+gbm1 <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.high_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=500,            # runs for 20,000 iterations       
+            shrinkage=0.0005,         # sets the shrinkage parameter (see # Appendix B)       
+            interaction.depth=1,      # maximum allowed interaction degree       
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=10)        # minimum node size for trees 
+
+pscore_bs <-  1 / (1 + exp(-gbm1$fit))
+high_cp_bs <- highdim
+high_cp_bs$pscore=pscore_bs
+
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(high_cp_bs$pscore[high_cp_bs$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,100),xlab="Propensity Score", ylab="",main="")
+lines(density(high_cp_bs$pscore[high_cp_bs$A==1]),col='red')
+hist(high_cp_bs$pscore[high_cp_bs$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,100),add=TRUE)
+lines(density(high_cp_bs$pscore[high_cp_bs$A==0]),col='blue')
+```
+
+### For Low Dimension Data
+```{r}
+library(gbm)
+set.seed(0)
+prop.fit.low_bs <- lowdim[, setdiff(names(lowdim), 'Y')]
+gbm1 <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.low_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=95,            # runs for 95 iterations       
+            shrinkage=0.0005,         # sets the shrinkage parameter       
+            interaction.depth=1,      # maximum allowed interaction degree       
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=10)        # minimum node size for trees 
+
+pscore_bs <-  1 / (1 + exp(-gbm1$fit))
+low_cp_bs <- lowdim
+low_cp_bs$pscore=pscore_bs
+
+```
+
+```{r}
+library(grDevices)
+col.alpha = function(color,alpha){
+  code = col2rgb(color)/256
+  rgb(code[1],code[2],code[3],alpha)
+}
+
+hist(low_cp_bs$pscore[low_cp_bs$A==1], breaks=20,col=col.alpha('red',.5),freq=FALSE,
+     ylim=c(0,700),xlim=c(0.23,0.248),xlab="Propensity Score", ylab="",main="")
+lines(density(low_cp_bs$pscore[low_cp_bs$A==1]),col='red')
+hist(low_cp_bs$pscore[low_cp_bs$A==0],breaks=20,col=col.alpha('blue',.5),freq=FALSE,
+     ylim=c(0,700),xlim=c(0.23,0.248),add=TRUE)
+lines(density(low_cp_bs$pscore[low_cp_bs$A==0]),col='blue')
+```

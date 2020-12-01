@@ -1,0 +1,152 @@
+---
+title: "WeightedRegression"
+author: '-'
+date: "2020/11/22"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(reshape2)
+low <- read_csv("C:/Users/60171/Downloads/lowDim_dataset.csv")
+high <- read_csv("C:/Users/60171/Downloads/highDim_dataset.csv")
+```
+
+## LowDim Dataset
+```{r}
+# Assume all covariates have an influence on the assignment to either the control or the treatment group
+lr_low <- glm(A~., data=subset(low,select=-Y), family = binomial())
+```
+
+```{r}
+# Attaching propensity score to the low_dim dataset
+low$psvalue <- predict(lr_low, type='response')
+
+# Histograms for propensity scores
+low_treated <- low[low$A==1,]
+hist(low_treated$psvalue)
+
+low_controled <-low[low$A==0,]
+hist(low_controled$psvalue)
+#From two graphs we could see, there is sufficient overlap between the two groups
+```
+
+
+Weights for ATE: We define the weights using:
+* for the treatment group: 1/low$psvalue
+* for the control group: 1/(1-low$psvalue)
+```{r}
+# Estimation and storing weights using propensity score estimated using logistic regression
+# Attaching weight to the low_dim dataset
+low$weight.ATE <- ifelse(low$A == 1, 1/low$psvalue, 1/(1-low$psvalue))
+```
+
+```{r}
+# Run weighted regression to find the ATE w/o variable selection
+
+# calculate the mean of each column
+low_mean <- colMeans(low)
+# Add columns of treatment effect
+low_diff <- low %>% 
+  mutate_at(list(mean_diff = (~.*low$A - low_mean*low$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+ATE_low <- lm(Y~., data = low_diff , weights = low$weight.ATE)
+summary(ATE_low)
+#ATE = 3.10
+```
+
+```{r}
+# select variables by weighted regression
+lr_low <- lm(Y~.-psvalue-weight.ATE, data = low)
+summary(lr_low)
+
+# result shows we should not include v2, v4, v9, v14
+```
+
+```{r}
+# We choose to delete the following 3 variables
+delete <- names(low) %in% c("V2", "V4","V9", "V14")
+low_delete <- low[!delete]
+# calculate the mean of each column
+low_delete_mean <- colMeans(low_delete)
+# Add columns of treatment effect
+low_delete_diff <- low_delete %>% 
+  mutate_at(list(mean_diff = (~.*low_delete$A - low_delete_mean*low_delete$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+ATE_low_selected <- lm(Y~., data = low_delete_diff , weights = low_delete$weight.ATE)
+summary(ATE_low_selected)
+#ATE= 3.09
+```
+
+## HighDim Dataset
+```{r}
+# Assume all covariates have an influence on the assignment to either the control or the treatment group
+lr_high <- glm(A~., data=subset(high,select=-Y), family = binomial())
+
+```
+
+```{r}
+# Attaching propensity score to the high_dim dataset
+high$psvalue <- predict(lr_high, type='response')
+
+# Histograms for propensity scores
+high_treated <- low[low$A==1,]
+hist(high_treated$psvalue)
+
+high_controled <-low[low$A==0,]
+hist(high_controled$psvalue)
+#From two graphs we could see, there is sufficient overlap between the two groups
+```
+
+```{r}
+# Estimation and storing weights using propensity score estimated using logistic regression
+# Attaching weight to the high_dim dataset
+high$weight.ATE <- ifelse(high$A == 1, 1/high$psvalue, 1/(1-high$psvalue))
+```
+
+```{r}
+# Run weighted regression to find the ATE w/o variable selection
+
+# calculate the mean of each column
+high_mean <- colMeans(high)
+# Add columns of treatment effect
+high_diff <- high %>% 
+  mutate_at(list(mean_diff = (~.*high$A - high_mean*high$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+ATE_high <- lm(Y~., data = high_diff , weights = high$weight.ATE)
+summary(ATE_high)
+#-4.673
+```
+
+
+```{r}
+# select variables by regression
+# selected by set t less than 1.96 or larger than 1.96
+t_high=list()
+for (i in names(high)){
+  t_high[[i]] <- summary(lm(Y~get(i), high))[["coefficients"]][2, "t value"]
+}
+t_high = data.frame(t_high)%>%melt()%>%filter(between(value, -1.96,1.96))
+t_high$variable
+```
+```{r}
+# We choose to delete the following variables
+delete1 <- names(high) %in% c('V1','V2','V4','V5','V8','V9','V13','V15','V18','V28','V29','V34','V36','V39','V41','V42','V43','V44','V47','V49','V50','V52','V53','V54','V55','V57','V58','V59','V97','V151')
+high_delete <- high[!delete1]
+# calculate the mean of each column
+high_delete_mean <- colMeans(high_delete)
+# Add columns of treatment effect
+high_delete_diff <- high_delete %>% 
+  mutate_at(list(mean_diff = (~.*high_delete$A - high_delete_mean*high_delete$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+ATE_high_selected <- lm(Y~., data = high_delete_diff , weights = high_delete$weight.ATE)
+summary(ATE_high_selected)
+#ATE = -4.135
+```
+
+
