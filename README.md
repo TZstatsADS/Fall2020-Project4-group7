@@ -9,7 +9,7 @@ Term: Fall 2020
 + Project Subtitle: Compare different Propensity Score Estimation Methods for Full Matching (PS) and Weighted Regression
 + Team members
 	+ Yunuo Ma (Presenter)
-	+ team member 2
+	+ Mengyao He
 	+ team member 3
 	+ team member 4
 	+ team member 5
