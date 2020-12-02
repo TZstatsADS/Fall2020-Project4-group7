@@ -26,7 +26,7 @@ In this project, our group was assigned to use all 5 methods of propensity score
 
 + Xiaoli Sun: Contributed to estimating ATE by Weighted Regression, helped with creating PPT and editing speaker notes for Weighted Regression part.
 
-+ Ziyu Kong:
++ Ziyu Kong: Contributed to Implementing Propensity Score Matching (Full Matching) with distance of propensity scores,helped with creating PPT and editing speaker notes
 
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
