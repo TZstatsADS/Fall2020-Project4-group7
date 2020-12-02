@@ -17,7 +17,7 @@ They are:
 
 
 #### Step 0.1 Load Required Packages
-```{r message=FALSE}
+```{r message=FALSE, warning=FALSE}
 packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse","smotefamily","knitr")
 # check packages that need to be installed.
 #packages.needed <- setdiff(packages.used, 
@@ -784,13 +784,54 @@ cat(c("[...]", out_low[9:12], "[...]"), sep = "\n")
 #Time used to estimate ATE
 #time_wlr_low[[3]]
 ```
+**Low dimensional balanced data:**
+For low dimensional data, we follow the same steps, first is to find the subset:
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
+# Assume all covariates have an influence on the assignment to either the control or the treatment group
+lr_low_balanced_smote <- glm(A~., data=subset(low_balanced_smote,select=-Y), family = binomial())
+# Attaching propensity score to the low_dim dataset
+low_balanced_smote$psvalue <- predict(lr_low_balanced_smote, type='response')
+# Estimation and storing weights using propensity score estimated using logistic regression
+# Attaching weight to the low_dim dataset
+low_balanced_smote$weight.ATE <- ifelse(low_balanced_smote$A == 1, 1/low_balanced_smote$psvalue, 1/(1-low_balanced_smote$psvalue))
+# calculate the mean of each column
+low_balanced_smote_mean <- colMeans(low_balanced_smote)
+# select variables by regression
+# selected by set t less than 1.96 or larger than 1.96
+t_low_balanced_smote=list()
+for (i in names(low_balanced_smote)){
+  t_low_balanced_smote[[i]] <- summary(lm(Y~get(i), low_balanced_smote))[["coefficients"]][2, "t value"]
+}
+t_low_balanced_smote = data.frame(t_low_balanced_smote)%>%melt()%>%filter(between(value, -1.96,1.96))
+t_low_balanced_smote$variable
+```
+
+After deleting the above variables, ATE is estimated by following result, which is around 2.788:
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
+# We choose to delete the following variables
+delete2 <- names(low_balanced_smote) %in% c("V4","V8","V9","V11","V14", "V20")
+low_balanced_smote_delete <- low_balanced_smote[!delete2]
+# calculate the mean of each column
+low_balanced_smote_delete_mean <- colMeans(low_balanced_smote_delete)
+# Add columns of treatment effect
+low_balanced_smote_delete_diff <- low_balanced_smote_delete %>% 
+  mutate_at(list(mean_diff = (~.*low_balanced_smote_delete$A - low_balanced_smote_delete_mean*low_balanced_smote_delete$A)), .vars = vars(starts_with("V")))%>%
+  select(-psvalue,-weight.ATE)
+
+time_wlr_low_balanced_smote = system.time(ATE_low_balanced_smote_selected <- lm(Y~., data = low_balanced_smote_delete_diff , weights = low_balanced_smote_delete$weight.ATE))
+out_low_balanced_smote<-capture.output(summary(ATE_low_balanced_smote_selected))
+cat(c("[...]", out_low_balanced_smote[c(9:10,28)], "[...]"), sep = "\n")
+#ATE= 2.847
+#Time used to estimate ATE
+#time_wlr_low_balanced_smote[[3]]
+```
 
 ### Summary
 #### ATE results comparison
-The following table shows estimated ATEs, since we know the tree ATE for high dimensional dataset is -3 and for low dimensional dataset is 2.5. We could see that $Logistic_FullMatching$ performs best, especially on the the balanced dataset.
+The following table shows estimated ATEs, since we know the tree ATE for high dimensional dataset is -3 and for low dimensional dataset is 2.5. We could see that $Logistic FullMatching$ performs best, especially on the the balanced dataset.
 ```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
 #ATE results
-ATE1=data.frame(Logistic_FullMatching = c(a,b,B),L1_FullMatching = c(c,d,D),L2_FullMatching = c(e,f,FF),CART_FullMatching = c(g,h,H),BS_FullMatching = c(ii,j,J),Logistic_WeightedReg = c(-4.13500,2.78831,NA), True_ATE = c(-3,2.5,NA),row.names = c("highdim","lowdim","balanced lowdim"))
+ATE1=data.frame(Logistic_FullMatching = c(a,b,B),L1_FullMatching = c(c,d,D),L2_FullMatching = c(e,f,FF),CART_FullMatching = c(g,h,H),BS_FullMatching = c(ii,j,J),Logistic_WeightedReg = c(-4.13500,2.78831,2.84753), True_ATE = c(-3,2.5,NA),row.names = c("highdim","lowdim","balanced lowdim"))
 ATE1
 ```
 
@@ -806,7 +847,7 @@ TIME1
 The following table shows each method's time of estimating ATE. We could see that Weighted Regression performs much better than FullMatching. The reason might because the package MatchIt will be slower while processing large dataset. In the future, we could try different packages to see if the running time can be improved.
 ```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
 #ATE estimation time
-TIME0=data.frame(Logistic_FullMatching  = c(time_a,time_b,time_B),L1_FullMatching  = c(time_c,time_d,time_D),L2_FullMatching  = c(time_e,time_f,time_FF),CART_FullMatching  = c(time_g,time_h,time_H),BS_FullMatching  = c(time_i,time_j,time_J), Logistic_WeightedReg = c(time_wlr_high[[3]],time_wlr_low[[3]],NA), row.names = c("highdim","lowdim","balanced lowdim"))
+TIME0=data.frame(Logistic_FullMatching  = c(time_a,time_b,time_B),L1_FullMatching  = c(time_c,time_d,time_D),L2_FullMatching  = c(time_e,time_f,time_FF),CART_FullMatching  = c(time_g,time_h,time_H),BS_FullMatching  = c(time_i,time_j,time_J), Logistic_WeightedReg = c(time_wlr_high[[3]],time_wlr_low[[3]],time_wlr_low_balanced_smote[[3]]), row.names = c("highdim","lowdim","balanced lowdim"))
 TIME0
 ```
 
