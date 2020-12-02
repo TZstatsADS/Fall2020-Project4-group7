@@ -22,14 +22,15 @@ They are:
 #### Step 0.1 Load Required Packages
 ```{r message=FALSE, warning=FALSE}
 packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse","smotefamily","knitr")
-# check packages that need to be installed.
-#packages.needed <- setdiff(packages.used, 
-#                           intersect(installed.packages()[,1], 
-#                                     packages.used))
-# install additional packages
-#if(length(packages.needed) > 0){
-#  install.packages(packages.needed, dependencies = TRUE)
-#}
+
+#check packages that need to be installed.
+packages.needed <- setdiff(packages.used, 
+                           intersect(installed.packages()[,1], 
+                                     packages.used))
+#install additional packages
+if(length(packages.needed) > 0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
 library(smotefamily)
 library(grDevices)
 library(glmnet)
