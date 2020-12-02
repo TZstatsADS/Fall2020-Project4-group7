@@ -2,17 +2,20 @@
 title: "Final_Report"
 author: "Group_7"
 date: "2020/11/30"
-output: html_document
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
 ---
 ## Overview
 In this project, we are going to use 5 different ways to estimate propensity scores and two algorithms to estimate ATE.
 They are:
 
-* Logistic Regression + Full Matching
-* L1 Logistic Reg + Full Matching
-* L2 Logistic Reg + Full Matching
-* CART + Full Matching
-* Boosting Stumps + Full Matching
+* Logistic Regression + Full Matching(propensity score distance measurement)
+* L1 Logistic Reg + Full Matching(propensity score distance measurement)
+* L2 Logistic Reg + Full Matching(propensity score distance measurement)
+* CART + Full Matching(propensity score distance measurement)
+* Boosting Stumps + Full Matching(propensity score distance measurement)
 * Logistic Regression + Weighted Regression
 
 
@@ -54,6 +57,9 @@ $$e(x) = Pr(T =1|X=x)$$
 We assume that: 
 $$0<e(x)<1$$
 for all x, here we denote X as the covariates of p-dimensional vector of pre-treatment variables.
+
+These following histograms indicate the change of different methods for propensity score estimations without and with oversampling by SMOTE on low dimensional data.
+All histograms show that treatment group and control group have enough propensity scores overlapped, which indicates that both datasets are qualified to perform Propensity Score Matching and Weighted Regression.
 
 #### 1.1 Without Oversampling for Imbalanced Classification
 ##### 1.1.1 Estimate by Logistic Regression
@@ -400,6 +406,9 @@ lines(density(low_cp_bs$pscore[low_cp_bs$A==0]),col='blue')
 #### 1.2 Oversampling for Imbalanced Classification
 Since the treatment classification (A) ratio is $1103 (0) : 897 (1) = 1.229654$ in high dimension data, and the treatment classification (A) ratio is $363 (0) : 112 (1) = 3.241071$ in low dimension data. We decided to use Synthetic Minority Oversampling Technique to generate synthetic positive instances using SMOTE algorithm only on low dimension data. After oversampling, the treatment classification (A) ratio is $363 (0) : 336 (1) = 1.080357$ in low dimension data.
 
+The reason why we choose to use SMOTE is:
+In full matching, reduce observations to similar pairs reduces bias allowing both groups to be equally represented and analyzed using statistical measures of significance to assess improvement for the treatment group. Even though using the propensity score for the match criteria would help dealing with imbalance data, we still want to try other oversampling techniques before full matching. We used Synthetic Minority Over-sampling Technique (SMOTE) on low dimensional data to create synthetic samples and used these generated samples to estimate the propensity scores.
+
 
 ```{r, echo = FALSE, results = TRUE, message=FALSE}
 set.seed(0)
@@ -589,7 +598,11 @@ lines(density(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==0]),co
 ```
 
 ### 2. Propensity Score Matching
-Full matching is a type of subclassification that forms the subclasses in an optimal way. It creates a series of matched sets where each matched set contains at least one treated individual and at least one control individual. Full matching is optimal in terms of minimizing a weighted average of the estimated distance measure between each treated subject and each control subject within each subclass. Here, we use propensity score to measure the distance.
+After we got propensity score estimations based on different methods, we implemented Full Matching. 
+First, we calculated distances of propensity scores, and then we obtained the matched sets where each matched set contains at least one treated individual and one control individual and these were formed in an optimal way. (s.t. Treated individuals who have many comparison individuals who are similar will be grouped with many comparison individuals). 
+After that, we calculated subclass treatment effects for each matched set and then estimated overall ATE by an weighted average of the subclass effects where weights corresponding to the number of individuals in each subclass.
+
+The results of estimating ATE are shown as following:
 ```{r, echo = FALSE, results = TRUE, message=FALSE}
 full_matching_ate <- function(dat,propensity_score){
   match_full_low<-matchit(A~.-Y,data=dat,method="full",estimand = "ATE",
@@ -806,7 +819,7 @@ t_low_balanced_smote = data.frame(t_low_balanced_smote)%>%melt()%>%filter(betwee
 t_low_balanced_smote$variable
 ```
 
-After deleting the above variables, ATE is estimated by following result, which is around 2.788:
+After deleting the above variables, ATE is estimated by following result, which is around 2.929:
 ```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
 # We choose to delete the following variables
 delete2 <- names(low_balanced_smote) %in% c("V4","V8","V9","V11","V14", "V20")
@@ -828,7 +841,7 @@ cat(c("[...]", out_low_balanced_smote[c(9:10,28)], "[...]"), sep = "\n")
 
 ### Summary
 #### ATE results comparison
-The following table shows estimated ATEs, since we know the tree ATE for high dimensional dataset is -3 and for low dimensional dataset is 2.5. We could see that $Logistic FullMatching$ performs best, especially on the the balanced dataset.
+The following table shows estimated ATEs, we could see that Logistic Regression with Full Matching using propensity score distance measurement performs the best on both datasets. Regression tree with Full Matching using propensity score distance measurement is not well performed on low dimensional data, while the estimated ATE is very close to true ATE value after oversampling by SMOTE.
 ```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
 #ATE results
 ATE1=data.frame(Logistic_FullMatching = c(a,b,B),L1_FullMatching = c(c,d,D),L2_FullMatching = c(e,f,FF),CART_FullMatching = c(g,h,H),BS_FullMatching = c(ii,j,J),Logistic_WeightedReg = c(-4.13500,2.78831,2.84753), True_ATE = c(-3,2.5,NA),row.names = c("highdim","lowdim","balanced lowdim"))
