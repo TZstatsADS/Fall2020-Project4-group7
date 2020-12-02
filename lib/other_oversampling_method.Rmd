@@ -1,0 +1,202 @@
+---
+title: "Untitled"
+author: "Mengyao He"
+date: "11/30/2020"
+output: pdf_document
+---
+# Load Library
+```{r}
+library(readr)
+library(survival)
+library(optmatch)
+library(MatchIt)
+library(glmnet)
+library(ATE)
+library(tidyverse)
+library(dplyr)
+library(imbalance)
+```
+
+# ATE function
+```{r}
+full_matching_ate <- function(dat,propensity_score){
+  match_full_low<-matchit(A~.-Y,data=dat,method="full",
+                          distance = propensity_score)
+  data.fullMatching <- match.data(match_full_low)
+  data.fullMatching$Y <- dat$Y
+  a = data.fullMatching %>% group_by(subclass,A) %>% summarise(mean_y = mean(Y))
+  group_ate = a %>% group_by(subclass) %>% summarise(treat_eff = mean_y[A == 1] - mean_y[A == 0])
+  group_n = data.fullMatching %>% group_by(subclass) %>% count()
+  ate = sum(group_ate$treat_eff*group_n$n/nrow(dat))
+  return(ate)
+}
+```
+
+# Import Data
+```{r}
+set.seed(0)
+lowDim <- read_csv("lowDim_dataset.csv")
+lowDim$A = as.factor(lowDim$A)
+lowDim = as.data.frame(lowDim)
+newrwo <- rwo(lowDim, numInstances = sum(lowDim$A == 0)-sum(lowDim$A == 1), classAttr = "A")
+lowDim.over <- rbind(lowDim, newrwo)
+
+# newMWMOTE <- mwmote(lowDim, numInstances = sum(lowDim$A == 0)-sum(lowDim$A == 1), classAttr = "A")
+# lowDim.over <- rbind(lowDim, newMWMOTE)
+```
+
+```{r}
+set.seed(0)
+highDim <- read_csv("highDim_dataset.csv")
+highDim$A = as.factor(highDim$A)
+highDim = as.data.frame(highDim)
+newrwo <- rwo(highDim, numInstances = sum(highDim$A == 0)-sum(highDim$A == 1), classAttr = "A")
+highDim.over <- rbind(highDim, newrwo)
+
+# newMWMOTE <- mwmote(highDim, numInstances = sum(highDim$A == 0)-sum(highDim$A == 1), classAttr = "A")
+# highDim.over <- rbind(highDim, newMWMOTE)
+```
+
+# Logistic Regression
+## high
+```{r}
+set.seed(0)
+glm_high <- glm(A~.-Y, family=binomial, data=highDim.over)
+glm_high.probs <- predict(glm_high,type = "response")
+full_matching_ate(highDim.over,glm_high.probs)
+```
+
+## low
+```{r}
+set.seed(0)
+glm_low <- glm(A~.-Y, family=binomial, data=lowDim.over)
+glm_low.probs <- predict(glm_low,type = "response")
+full_matching_ate(lowDim.over,glm_low.probs)
+```
+
+# Lasso
+```{r}
+set.seed(0)
+x <- model.matrix(A~.,subset(lowDim.over,select = -Y))[,-1]
+y <- lowDim.over$A
+
+grid <- 10^(-3:10)
+cv.out <- cv.glmnet(x,y,alpha=1,lambda=grid,
+                 family="binomial",nfolds=5)
+bestlam <- cv.out$lambda.min
+lasso.mod <- glmnet(x, y, alpha=1, lambda=bestlam,
+                 family="binomial")
+lasso.probs <- predict(cv.out, x, s=cv.out$lambda.min,type="response")
+full_matching_ate(lowDim.over,lasso.probs[,1])
+```
+```{r}
+set.seed(0)
+
+x <- model.matrix(A~.,subset(highDim.over,select = -Y))[,-1]
+y <- highDim.over$A
+
+grid <- 10^(-3:10)
+cv.out <- cv.glmnet(x,y,alpha=1,lambda=grid,
+                 family="binomial",nfolds=5)
+bestlam <- cv.out$lambda.min
+lasso.mod <- glmnet(x, y, alpha=1, lambda=bestlam,
+                 family="binomial")
+lasso.probs <- predict(lasso.mod, x,type="response")
+full_matching_ate(highDim.over,lasso.probs[,'s0'])
+```
+
+# Ridge
+```{r}
+set.seed(0)
+x <- model.matrix(A~.,subset(lowDim.over,select = -Y))[,-1]
+y <- lowDim.over$A
+
+grid <- 10^(-3:10)
+cv.out <- cv.glmnet(x,y,alpha=0,lambda=grid,
+                 family="binomial",nfolds=5)
+bestlam <- cv.out$lambda.min
+lasso.mod <- glmnet(x, y, alpha=0, lambda=bestlam,
+                 family="binomial")
+lasso.probs <- predict(cv.out, x, s=cv.out$lambda.min,type="response")
+full_matching_ate(lowDim.over,lasso.probs[,1])
+```
+
+```{r}
+set.seed(0)
+
+x <- model.matrix(A~.,subset(highDim,select = -Y))[,-1]
+y <- highDim$A
+
+grid <- 10^(-3:10)
+cv.out <- cv.glmnet(x,y,alpha=0,lambda=grid,
+                 family="binomial",nfolds=5)
+bestlam <- cv.out$lambda.min
+lasso.mod <- glmnet(x, y, alpha=0, lambda=bestlam,
+                 family="binomial")
+lasso.probs <- predict(lasso.mod, x,type="response")
+full_matching_ate(highDim,lasso.probs[,'s0'])
+```
+
+# Regression Tree
+```{r}
+library(rpart)
+prop.fit.high_cart <- highDim[, setdiff(names(highDim), 'Y')]
+prop.out.high_cart <- rpart(A~., data=prop.fit.high_cart, method="class",parms = list(split = "information"))
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.high_cart)
+text(prop.out.high_cart, digits = 4)
+pscore_cart <- predict(prop.out.high_cart,type='prob')[,2]
+full_matching_ate(highDim,pscore_cart)
+
+```
+
+```{r}
+library(rpart)
+prop.fit.high_cart <- lowDim.over[, setdiff(names(lowDim.over), 'Y')]
+prop.out.high_cart <- rpart(A~., data=prop.fit.high_cart, method="class",parms = list(split = "information"))
+par(xpd = NA) # otherwise on some devices the text is clipped
+plot(prop.out.high_cart)
+text(prop.out.high_cart, digits = 4)
+pscore_cart <- predict(prop.out.high_cart,type='prob')[,2]
+full_matching_ate(lowDim.over,pscore_cart)
+
+```
+
+
+```{r}
+library(gbm)
+set.seed(0)
+prop.fit.low_bs <- lowDim.over[, setdiff(names(lowDim.over), 'Y')]
+gbm1 <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.low_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=95,            # runs for 95 iterations       
+            shrinkage=0.0005,         # sets the shrinkage parameter       
+            interaction.depth=1,      # maximum allowed interaction degree       
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=10)        # minimum node size for trees 
+
+pscore_bs <-  1 / (1 + exp(-gbm1$fit))
+full_matching_ate(lowDim.over,pscore_bs)
+
+```
+
+```{r}
+library(gbm)
+set.seed(0)
+prop.fit.low_bs <- highDim.over[, setdiff(names(highDim.over), 'Y')]
+gbm1 <- gbm(A~.,                # predicts z from all other variables       
+            data=prop.fit.low_bs,       # the dataset dropping y       
+            distribution="bernoulli", # indicates logistic regression       
+            n.trees=95,            # runs for 95 iterations       
+            shrinkage=0.0005,         # sets the shrinkage parameter       
+            interaction.depth=1,      # maximum allowed interaction degree       
+            bag.fraction=0.5,         # sets fraction used for Friedman's random subsampling of the data       
+            train.fraction=1.0,       # train.fraction<1.0 allows for out-of-sample prediction for stopping the algorithm   
+            n.minobsinnode=10)        # minimum node size for trees 
+
+pscore_bs <-  1 / (1 + exp(-gbm1$fit))
+full_matching_ate(highDim.over,pscore_bs)
+
+```
