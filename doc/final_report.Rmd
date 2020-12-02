@@ -5,11 +5,20 @@ date: "2020/11/30"
 output: html_document
 ---
 ## Overview
-Summary Table
+In this project, we are going to use 5 different ways to estimate propensity scores and two algorithms to estimate ATE.
+They are:
+
+* Logistic Regression + Full Matching
+* L1 Logistic Reg + Full Matching
+* L2 Logistic Reg + Full Matching
+* CART + Full Matching
+* Boosting Stumps + Full Matching
+* Logistic Regression + Weighted Regression
+
 
 #### Step 0.1 Load Required Packages
 ```{r message=FALSE}
-packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse","optmatch")
+packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr","reshape2","tidyverse","smotefamily","knitr")
 # check packages that need to be installed.
 #packages.needed <- setdiff(packages.used, 
 #                           intersect(installed.packages()[,1], 
@@ -18,6 +27,7 @@ packages.used <- c("grDevices","glmnet","rpart","gbm","MatchIt","readr","dplyr",
 #if(length(packages.needed) > 0){
 #  install.packages(packages.needed, dependencies = TRUE)
 #}
+library(smotefamily)
 library(grDevices)
 library(glmnet)
 library(rpart)
@@ -26,12 +36,13 @@ library(MatchIt)
 library(readr)
 library(dplyr)
 library(reshape2)
+library(knitr)
 #library(tidyverse)
 ```
 
 
 #### Step 0.2 Import Data
-```{r,echo=FALSE,results = FALSE,message = FALSE}
+```{r,results = FALSE, message=FALSE}
 path = '../data/'
 highdim = read_csv(paste0(path, 'highDim_dataset.csv')) #2000  187
 lowdim = read_csv(paste0(path, 'lowDim_dataset.csv')) #475  24
@@ -392,8 +403,7 @@ Since the treatment classification (A) ratio is $1103 (0) : 897 (1) = 1.229654$ 
 
 ```{r, echo = FALSE, results = TRUE, message=FALSE}
 set.seed(0)
-library(smotefamily)
-low_balanced_smote <- SMOTE(lowdim[,-2],lowdim[,2],dup_size=2)$data %>% mutate(A = as.numeric(class)) %>%select(-class)
+low_balanced_smote <- SMOTE(lowdim[,-2],unlist(lowdim[,2]),dup_size=2)$data %>% mutate(A = as.numeric(class)) %>%select(-class)
 ```
 
 ##### 1.2.1 Estimate by Logistic Regression
@@ -581,7 +591,6 @@ lines(density(low_balanced_smote_cp_bs$pscore[low_balanced_smote_cp_bs$A==0]),co
 ### 2. Propensity Score Matching
 Full matching is a type of subclassification that forms the subclasses in an optimal way. It creates a series of matched sets where each matched set contains at least one treated individual and at least one control individual. Full matching is optimal in terms of minimizing a weighted average of the estimated distance measure between each treated subject and each control subject within each subclass. Here, we use propensity score to measure the distance.
 ```{r, echo = FALSE, results = TRUE, message=FALSE}
-library(tidyverse)
 full_matching_ate <- function(dat,propensity_score){
   match_full_low<-matchit(A~.-Y,data=dat,method="full",estimand = "ATE",
                           distance = propensity_score)
@@ -653,7 +662,7 @@ end.time_H <- Sys.time()
 time_H <- as.numeric(end.time_H - start.time_H)
 
 start.time_i <- Sys.time()
-i <- full_matching_ate(highdim,pscore_bs_h)
+ii <- full_matching_ate(highdim,pscore_bs_h)
 end.time_i <- Sys.time()
 time_i <- as.numeric(end.time_i - start.time_i)
 
@@ -668,8 +677,8 @@ end.time_J <- Sys.time()
 time_J <- as.numeric(end.time_J - start.time_J)
 
 
-data.frame(Logistic = c(a,b,B),L1 = c(c,d,D),L2 = c(e,f,FF),CART = c(g,h,H),BS = c(i,j,J),row.names = c("highdim","lowdim","balanced lowdim"))
-data.frame(Logistic = c(time_a,time_b,time_B),L1 = c(time_c,time_d,time_D),L2 = c(time_e,time_f,time_FF),CART = c(time_g,time_h,time_H),BS = c(time_i,time_j,time_J),row.names = c("highdim","lowdim","balanced lowdim"))
+ATE0=data.frame(Logistic = c(a,b,B),L1 = c(c,d,D),L2 = c(e,f,FF),CART = c(g,h,H),BS = c(ii,j,J),row.names = c("highdim","lowdim","balanced lowdim"))
+ATE0
 
 ```
 
@@ -681,15 +690,17 @@ $$Y_i=\alpha_0+\tau*T_i+\alpha_1^{'}*Z_i+\alpha_2^{'}*(Z_i-\bar{Z})*T_i+\epsilon
 The weight $w_i$ is:
 $$w_i=\frac{T_i}{\hat{e_i}}+\frac{1-T_i}{1-\hat{e_i}}$$
 where $\hat{e_i}$ is the estimated propensity score for individual i. This weighting serves to weight both the treated and control groups up to the full sample
-The $Z_i$ are a subset of the covariates $X_i$ with sample average $\bar{Z}$. $\tau$ is an estimate for ATE.
+The $Z_i$ are a subset of the covariates $X_i$ with sample average $\bar{Z}$. $\tau$ is an estimate for ATE
+
 #### 3.1 Estimate by Logistic Regression + Weighted Regression 
+
 **High dimensional data:**
 First, we need to find $Z_i$ which is the subset of the covariates $X_i$, we will select $Z$ by estimating linear regressions:
 $$Y_i=\beta_{k0}+\beta_{k1}*T_i+\beta_{k2}*X_{ik}+\epsilon_i$$
 We calculate the t-statistic for the test of the null hypothesis that the slope coefficient $\beta_{k2}$ is equal to zero in each of these regressions, and now select for $Z$ all the covariates with a t-statistic larger in absolute value than 1.96. 
 we will only keep covariates with t-values less than 1.96 or larger than 1.96. Therefore, the following covariates do not qualify:
 
-```{r,echo = FALSE, results = TRUE, message=False}
+```{r,echo = FALSE, results = TRUE, message=FALSE,warning = FALSE}
 high=highdim
 low=lowdim
 # Assume all covariates have an influence on the assignment to either the control or the treatment group
@@ -712,7 +723,7 @@ t_high$variable
 ```
 
 After deleting the above variables, ATE is estimated by following result, which is around -4.135:
-```{r,echo = FALSE, results = TRUE, message=FALSE}
+```{r,echo = FALSE, results = TRUE, message=FALSE,warning = FALSE}
 
 # We choose to delete the following variables
 delete1 <- names(high) %in% c('V1','V2','V4','V5','V8','V9','V13','V15','V18','V28','V29','V34','V36','V39','V41','V42','V43','V44','V47','V49','V50','V52','V53','V54','V55','V57','V58','V59','V97','V151')
@@ -725,7 +736,8 @@ high_delete_diff <- high_delete %>%
   select(-psvalue,-weight.ATE)
 
 time_wlr_high = system.time(ATE_high_selected <- lm(Y~., data = high_delete_diff , weights = high_delete$weight.ATE))
-summary(ATE_high_selected)
+out_high<-capture.output(summary(ATE_high_selected))
+cat(c("[...]", out_high[9:12], "[...]"), sep = "\n")
 #ATE = -4.135
 #Time used to estimate ATE
 #time_wlr_high[[3]]
@@ -733,7 +745,7 @@ summary(ATE_high_selected)
 
 **Low dimensional data:**
 For low dimensional data, we follow the same steps, first is to find the subset:
-```{r,echo = FALSE, results = TRUE, message=False}
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
 # Assume all covariates have an influence on the assignment to either the control or the treatment group
 lr_low <- glm(A~., data=subset(low,select=-Y), family = binomial())
 # Attaching propensity score to the low_dim dataset
@@ -754,7 +766,7 @@ t_low$variable
 ```
 
 After deleting the above variables, ATE is estimated by following result, which is around 2.788:
-```{r,echo = FALSE, results = TRUE, message=FALSE}
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
 # We choose to delete the following variables
 delete <- names(low) %in% c("V2", "V4","V8","V9","V11","V14","V16","V20")
 low_delete <- low[!delete]
@@ -766,13 +778,37 @@ low_delete_diff <- low_delete %>%
   select(-psvalue,-weight.ATE)
 
 time_wlr_low = system.time(ATE_low_selected <- lm(Y~., data = low_delete_diff , weights = low_delete$weight.ATE))
-summary(ATE_low_selected)
+out_low<-capture.output(summary(ATE_low_selected))
+cat(c("[...]", out_low[9:12], "[...]"), sep = "\n")
 #ATE= 2.788
 #Time used to estimate ATE
 #time_wlr_low[[3]]
 ```
 
 ### Summary
+#### ATE results comparison
+The following table shows estimated ATEs, since we know the tree ATE for high dimensional dataset is -3 and for low dimensional dataset is 2.5. We could see that $Logistic_FullMatching$ performs best, especially on the the balanced dataset.
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
+#ATE results
+ATE1=data.frame(Logistic_FullMatching = c(a,b,B),L1_FullMatching = c(c,d,D),L2_FullMatching = c(e,f,FF),CART_FullMatching = c(g,h,H),BS_FullMatching = c(ii,j,J),Logistic_WeightedReg = c(-4.13500,2.78831,NA), True_ATE = c(-3,2.5,NA),row.names = c("highdim","lowdim","balanced lowdim"))
+ATE1
+```
+
+#### Propensity score estimation time
+The following table shows each method's time of estimating propensity scores. We could see that L1 runs fastest, which followed closely by L2. The reason might be L1 and L2 penalized strictly on dataset, therefore, they will only choose covariates that most related with. 
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
+#Propensity score estimation time
+TIME1=data.frame(Logistic = c(0.3910019,0.03999996,0.01700902),L1 = c(0.03896785,0.01000094,0.01003218),L2 = c(0.05304599,0.05304599,0.01000118),CART = c(1.48576,0.047000,0.08700299),BS = c(3.217024,0.073946,0.22999),row.names = c("highdim","lowdim","balanced lowdim"))
+TIME1
+```
+
+#### ATE estimation time
+The following table shows each method's time of estimating ATE. We could see that Weighted Regression performs much better than FullMatching. The reason might because the package MatchIt will be slower while processing large dataset. In the future, we could try different packages to see if the running time can be improved.
+```{r,echo = FALSE, results = TRUE, message=FALSE, warning = FALSE}
+#ATE estimation time
+TIME0=data.frame(Logistic_FullMatching  = c(time_a,time_b,time_B),L1_FullMatching  = c(time_c,time_d,time_D),L2_FullMatching  = c(time_e,time_f,time_FF),CART_FullMatching  = c(time_g,time_h,time_H),BS_FullMatching  = c(time_i,time_j,time_J), Logistic_WeightedReg = c(time_wlr_high[[3]],time_wlr_low[[3]],NA), row.names = c("highdim","lowdim","balanced lowdim"))
+TIME0
+```
 
 ### References
 
